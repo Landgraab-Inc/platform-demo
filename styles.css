@@ -1,0 +1,37 @@
+:root{
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+  color:#282531;background:#faf9fc;line-height:1.55;font-weight:400;
+  --purple:#745AA3;--purple-dark:#513878;--green:#A0C516;--line:#e4e1e9;--soft:#efebf6;--muted:#6c6875;
+}
+*{box-sizing:border-box}
+body{margin:0;min-width:320px}
+button,input,textarea{font:inherit}
+button{cursor:pointer}
+.shell{max-width:1180px;margin:0 auto;padding:32px 20px 60px}
+.topbar{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:34px}
+.brand{font-family:"Roboto Condensed","Arial Narrow",Arial,sans-serif;font-weight:800;letter-spacing:.02em}
+.badge{display:inline-flex;padding:5px 9px;border-radius:8px;background:var(--soft);color:var(--purple-dark);font-size:13px}
+.card{background:white;border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:0 8px 28px rgba(45,35,60,.04)}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:24px}
+h1,h2,h3{font-family:"Roboto Condensed","Arial Narrow",Arial,sans-serif;margin-top:0}
+h1{font-size:clamp(34px,5vw,52px);line-height:1.05}
+h2{font-size:28px}
+h3{font-size:21px}
+.muted{color:var(--muted)}
+.btn{border:0;border-radius:10px;padding:11px 16px;background:var(--purple);color:#fff;font-weight:650}
+.btn.secondary{background:#fff;color:var(--purple-dark);border:1px solid var(--line)}
+.btn:disabled{opacity:.5;cursor:default}
+.field{display:grid;gap:7px;margin:14px 0}
+.field input,.field textarea{width:100%;border:1px solid #c9c3d1;border-radius:10px;padding:12px;background:#fff}
+.field textarea{min-height:150px;resize:vertical}
+.auth{max-width:480px;margin:11vh auto}
+.notice{padding:13px 15px;border-radius:10px;background:var(--soft);color:var(--purple-dark);margin:14px 0}
+.notice.error{background:#fae9e7;color:#8b3329}
+.sections{display:grid;gap:8px}
+.section{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.chat{display:grid;gap:9px;margin:20px 0}
+.bubble{max-width:720px;border-radius:12px;background:#f4f1f8;padding:12px 14px}
+.bubble:nth-child(even){background:#f2f6e6}
+.savebar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px}
+.status{font-size:14px;color:var(--muted)}
+@media(max-width:820px){.grid{grid-template-columns:1fr}.topbar{align-items:flex-start;flex-direction:column}}
