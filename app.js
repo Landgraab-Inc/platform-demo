@@ -195,31 +195,100 @@ function renderRoute() {
   if (role === 'admin') renderAdminRoute(parts)
 }
 
+function roleWorkspaceLabel(role) {
+  return role === 'student' ? 'Кабинет ученика' : role === 'teacher' ? 'Кабинет преподавателя' : 'Кабинет администратора'
+}
+
 function commonHeader(extra = '') {
+  const name = state.profile.display_name || state.profile.email || ''
+  const initial = String(name || roleLabel(state.profile.role)).trim().charAt(0).toUpperCase()
   return `<header class="topbar">
-    <button class="brand-button" data-nav="#/${state.profile.role}/home" aria-label="На главную">
-      <span class="brand">CENTRUM DEUTSCH</span>
-      <span class="brand-sub">${roleLabel(state.profile.role)} · ${esc(state.profile.display_name || state.profile.email || '')}</span>
-    </button>
-    <div class="top-actions">${extra}<button class="btn ghost" data-logout>Выйти</button></div>
+    <div>
+      <div class="breadcrumb">${roleWorkspaceLabel(state.profile.role)}</div>
+      <div class="saveflag">${state.profile.role === 'student' ? 'Прогресс и ответы сохраняются на сервере' : 'Рабочее пространство · MVP'}</div>
+    </div>
+    <div class="topright">
+      ${extra}
+      <span class="badge gray">${esc(roleLabel(state.profile.role))}</span>
+      <span class="avatar" aria-hidden="true">${esc(initial)}</span>
+      <span class="profile-name">${esc(name)}</span>
+      <button class="btn text" data-logout>Выйти</button>
+    </div>
   </header>`
 }
 
-function shell(role, content, aside = '', options = {}) {
-  const nav = role === 'student'
-    ? [['Главная', '#/student/home'], ['Мои курсы', '#/student/courses']]
+function primaryNav(role, current) {
+  const studentCourseActive = current.startsWith('#/student/courses') || current.startsWith('#/student/course') || current.startsWith('#/student/module') || current.startsWith('#/student/section')
+  const items = role === 'student'
+    ? [
+        ['Личный кабинет', '#/student/home', true, current === '#/student/home'],
+        ['Мои курсы', '#/student/courses', true, studentCourseActive],
+        ['Чтение', '', false, false],
+        ['Словарь', '', false, false],
+        ['Повторение', '', false, false],
+        ['Встречи', '', false, false],
+        ['Мой профиль', '', false, false]
+      ]
     : role === 'teacher'
-      ? [['Обзор', '#/teacher/home'], ['Модуль A2.1-M01', '#/teacher/module/A2.1-M01']]
-      : [['Состояние', '#/admin/home']]
+      ? [
+          ['Обзор', '#/teacher/home', true, current === '#/teacher/home'],
+          ['Все материалы', '#/teacher/module/A2.1-M01', true, current.startsWith('#/teacher/module')],
+          ['Мои ученики', '', false, current.startsWith('#/teacher/cohort')],
+          ['Расписание', '', false, false]
+        ]
+      : [
+          ['Обзор', '#/admin/home', true, true],
+          ['Ученики и доступ', '', false, false],
+          ['Расписание групп', '', false, false],
+          ['Каталог материалов', '', false, false],
+          ['Журнал изменений', '', false, false]
+        ]
 
+  return items.map(([label, href, enabled, active]) => enabled
+    ? `<button class="navlink ${active ? 'active' : ''}" data-nav="${href}" ${active ? 'aria-current="page"' : ''}><span>${esc(label)}</span></button>`
+    : `<button class="navlink disabled" type="button" disabled aria-disabled="true"><span>${esc(label)}</span><small>позже</small></button>`
+  ).join('')
+}
+
+function lessonSidebar(current) {
+  const parts = routeParts()
+  if (state.profile.role !== 'student' || parts[1] !== 'section') return ''
+  const sectionId = parts.slice(2).join('/')
+  const sections = moduleSections()
+  return `<div class="navtitle">A2.1 · Модуль 01</div>
+    <div class="lesson-side-nav">${sections.map(section => {
+      const activities = sectionActivities(section.id)
+      const done = activities.filter(activityComplete).length
+      const enabled = activities.length > 0
+      if (!enabled) {
+        return `<button class="lessonnavitem disabled" disabled><span class="lesson-number">${String(section.ordinal).padStart(2, '0')}</span><span>${esc(section.title)}</span></button>`
+      }
+      return `<button class="lessonnavitem ${section.id === sectionId ? 'active' : ''} ${done === activities.length ? 'done' : ''}" data-nav="#/student/section/${esc(section.id)}" ${section.id === sectionId ? 'aria-current="step"' : ''}><span class="lesson-number">${String(section.ordinal).padStart(2, '0')}</span><span>${esc(section.title)}</span></button>`
+    }).join('')}</div>`
+}
+
+function shell(role, content, aside = '', options = {}) {
   const current = location.hash || `#/${role}/home`
-  const navHtml = nav.map(([label, href]) => `<button class="nav-item ${current.startsWith(href) ? 'active' : ''}" data-nav="${href}">${esc(label)}</button>`).join('')
-  return `<main class="shell">
-    ${commonHeader(options.headerExtra || '')}
-    <div class="app-layout ${aside ? '' : 'no-aside'}">
-      <nav class="side-nav" aria-label="Основная навигация">${navHtml}</nav>
-      <section class="main-view">${content}</section>
-      ${aside ? `<aside class="right-rail">${aside}</aside>` : ''}
+  return `<main class="app-shell">
+    <aside class="sidebar">
+      <button class="brand" data-nav="#/${role}/home" aria-label="На главную">
+        <span class="brandmark">Z</span>
+        <span>ZENTRUM<br>FÜR DEUTSCH<small>ЦЕНТР НЕМЕЦКОГО ЯЗЫКА</small></span>
+      </button>
+      <div class="role-label">${roleWorkspaceLabel(role)}</div>
+      <div class="navscroll">
+        ${primaryNav(role, current)}
+        ${lessonSidebar(current)}
+      </div>
+      <div class="sidebar-bottom">
+        <div class="small muted">${role === 'student' ? 'Свой ритм. Свои результаты.' : 'Рабочее пространство'}<br>MVP · A2.1-M01</div>
+      </div>
+    </aside>
+    <div class="mainwrap">
+      ${commonHeader(options.headerExtra || '')}
+      <section class="main-view">
+        ${aside ? `<div class="twocol"><div class="content-column">${content}</div><aside class="rail">${aside}</aside></div>` : content}
+      </section>
     </div>
   </main>`
 }
@@ -316,23 +385,64 @@ function renderStudentHome() {
   const progress = studentProgress(module?.id)
   const resume = resumeSection()
   const course = state.data.courses.find(x => x.id === module?.course_id) || state.data.courses[0]
-  const content = `<div class="eyebrow">МОЁ ОБУЧЕНИЕ</div>
-    <h1>Здравствуйте, ${esc(state.profile.display_name || 'ученик')}</h1>
-    <p class="lead muted">Здесь видно, где ты остановился и что делать дальше.</p>
-    <section class="resume-card">
-      <div>
-        <span class="badge">Продолжить</span>
-        <h2>${esc(module?.title || 'A2.1 · Модуль 01')}</h2>
-        <p>${esc(module?.learning_outcome || '')}</p>
-        <div class="progress-row"><div class="progress-track"><span style="width:${progress.percent}%"></span></div><strong>${progress.percent}%</strong></div>
-      </div>
-      <button class="btn" data-nav="#/student/section/${esc(resume?.id || '')}">Продолжить: ${esc(resume?.title || 'модуль')}</button>
-    </section>
-    <div class="section-heading"><h2>Мои курсы</h2><button class="btn text" data-nav="#/student/courses">Все курсы →</button></div>
-    <div class="course-grid">${course ? studentCourseCard(course) : emptyState('Курсы пока не назначены', 'После выдачи enrollment курс появится здесь.')}</div>`
+  const firstName = String(state.profile.display_name || 'ученик').trim().split(/\s+/)[0]
 
-  const aside = `<section class="rail-card"><span class="rail-label">СЕЙЧАС</span><h3>${esc(resume?.title || 'Модуль')}</h3><p class="muted">${resume ? `${resume.ordinal} из ${moduleSections().length} разделов` : ''}</p><button class="btn secondary full" data-nav="#/student/module/${esc(module?.id || MODULE_ID)}">Структура модуля</button></section>
-    <section class="rail-card"><span class="rail-label">ЗАНЯТИЯ</span><p><strong>2 занятия</strong> с преподавателем по 90 минут входят в модуль.</p></section>`
+  const content = `<div class="eyebrow">ЛИЧНЫЙ КАБИНЕТ</div>
+    <h1>Привет, ${esc(firstName)}.</h1>
+    <section class="hero">
+      <div>
+        <div class="eyebrow">A2.1 · МОДУЛЬ 01</div>
+        <h2>${esc(module?.title || 'Договориться о встрече и изменить планы')}</h2>
+        <p class="hero-desc">${esc(module?.learning_outcome || '')}</p>
+        <div class="actions">
+          <button class="btn" data-nav="#/student/section/${esc(resume?.id || firstModuleSection()?.id || '')}">${progress.done ? 'Продолжить модуль' : 'Начать модуль'} →</button>
+        </div>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <div class="hero-art-top">A2.1</div>
+        <div class="hero-art-number">01</div>
+        <div class="hero-art-label">модуль</div>
+      </div>
+    </section>
+
+    <div class="stats">
+      <div class="stat">
+        <b>${progress.percent}%</b>
+        <span>текущий модуль</span>
+        <p class="small">Продолжить: <button class="inline-link" data-nav="#/student/section/${esc(resume?.id || '')}">${esc(resume?.title || 'модуль')}</button></p>
+      </div>
+      <div class="stat muted-stat">
+        <b>Повторение</b>
+        <span>Будет подключено на следующем этапе.</span>
+        <span class="unavailable-label">пока недоступно</span>
+      </div>
+    </div>
+
+    <div class="section-head"><h2>Мои курсы</h2><button class="inline-link" data-nav="#/student/courses">Вся программа →</button></div>
+    <div class="course-grid">${course ? studentCourseCard(course) : emptyState('Курсы пока не назначены', 'После выдачи enrollment курс появится здесь.')}</div>
+
+    <section class="card unavailable-card">
+      <span class="badge gray">Позже</span>
+      <h3>Слова, которые нужны тебе</h3>
+      <p>Словарь уже предусмотрен в архитектуре платформы, но в этот MVP пока не подключён.</p>
+    </section>`
+
+  const aside = `<section class="rail-card">
+      <span class="rail-label">МОЯ СТУПЕНЬ</span>
+      <div class="level-value">${esc(course?.level_code || course?.id || 'A2.1')}</div>
+    </section>
+    <section class="rail-card">
+      <span class="rail-label">СЛЕДУЮЩИЙ ШАГ</span>
+      <h3>${esc(resume?.title || 'Модуль')}</h3>
+      <p class="muted">${resume ? `${resume.ordinal} из ${moduleSections().length} разделов` : ''}</p>
+      <button class="btn secondary full" data-nav="#/student/module/${esc(module?.id || MODULE_ID)}">Структура модуля</button>
+    </section>
+    <section class="rail-card unavailable-card">
+      <span class="rail-label">ВСТРЕЧИ</span>
+      <p><strong>2 занятия по 90 минут</strong> входят в модуль.</p>
+      <span class="unavailable-label">расписание пока не подключено</span>
+    </section>`
+
   app.innerHTML = shell('student', content, aside)
 }
 
@@ -400,20 +510,21 @@ function renderStudentSection(sectionId) {
   const idx = sections.findIndex(x => x.id === section.id)
   const copy = SECTION_COPY[section.legacy_key] || [section.title, '']
   const content = `<div class="breadcrumbs"><button data-nav="#/student/course/${esc(module.course_id)}">${esc(module.course_id)}</button><span>›</span><button data-nav="#/student/module/${esc(module.id)}">${esc(module.title)}</button><span>›</span><span>${esc(section.title)}</span></div>
-    <span class="badge">${section.ordinal} / ${sections.length} · ${esc(section.duration_label || '')}</span>
-    <h1>${esc(copy[0])}</h1><p class="lead muted">${esc(copy[1])}</p>
-    <div class="activity-stack">${activities.length ? activities.map(renderStudentActivity).join('') : emptyState('В этом разделе пока нет серверного задания', 'Структура раздела уже есть, содержимое будет подключено следующим инкрементом.')}</div>
-    <div class="lesson-footer">
-      ${idx > 0 ? `<button class="btn secondary" data-nav="#/student/section/${esc(sections[idx - 1].id)}">← ${esc(sections[idx - 1].title)}</button>` : '<span></span>'}
-      ${idx < sections.length - 1 ? `<button class="btn" data-nav="#/student/section/${esc(sections[idx + 1].id)}">${esc(sections[idx + 1].title)} →</button>` : `<button class="btn" data-nav="#/student/module/${esc(module.id)}">К структуре модуля</button>`}
+    <div class="lessonhead">
+      <div class="inline"><span class="badge green">${esc(module.course_id)} · Модуль ${String(module.ordinal).padStart(2, '0')}</span><span class="small muted">${esc(module.title)}</span></div>
+      <h1>${esc(copy[0])}</h1>
+      <div class="keyinfo"><span>Шаг ${idx + 1} из ${sections.length}</span><span>${esc(section.duration_label || '')}</span><span>${activities.length} задан${activities.length === 1 ? 'ие' : 'ия'}</span></div>
+      ${copy[1] ? `<p class="lead muted">${esc(copy[1])}</p>` : ''}
+    </div>
+    <div class="lessonbody">
+      <div class="activity-stack">${activities.length ? activities.map(renderStudentActivity).join('') : emptyState('В этом разделе пока нет серверного задания', 'Раздел показан в структуре, но недоступен для прохождения.')}</div>
+      <div class="footeractions">
+        ${idx > 0 ? `<button class="btn secondary" data-nav="#/student/section/${esc(sections[idx - 1].id)}">← ${esc(sections[idx - 1].title)}</button>` : `<button class="btn secondary" data-nav="#/student/module/${esc(module.id)}">К плану модуля</button>`}
+        ${idx < sections.length - 1 ? `<button class="btn" data-nav="#/student/section/${esc(sections[idx + 1].id)}">${esc(sections[idx + 1].title)} →</button>` : `<button class="btn" data-nav="#/student/module/${esc(module.id)}">К структуре модуля</button>`}
+      </div>
+      <p class="small muted">Ответы и прогресс сохраняются отдельно. Переход между разделами не означает автоматического освоения навыка.</p>
     </div>`
-
-  const aside = `<section class="rail-card sticky"><div class="rail-label">МОДУЛЬ 01</div><div class="lesson-nav">${sections.map(item => {
-    const acts = sectionActivities(item.id)
-    const done = acts.filter(activityComplete).length
-    return `<button class="lesson-nav-item ${item.id === section.id ? 'active' : ''}" data-nav="#/student/section/${esc(item.id)}"><span>${item.ordinal}. ${esc(item.title)}</span><small>${done}/${acts.length}</small></button>`
-  }).join('')}</div></section>`
-  app.innerHTML = shell('student', content, aside)
+  app.innerHTML = shell('student', content)
   saveStudentProgress(section.id).catch(console.error)
 }
 
@@ -765,10 +876,18 @@ function stopRecording(activityId) {
   if (state.recording.recorder.state !== 'inactive') state.recording.recorder.stop()
 }
 
+app.addEventListener('pointerdown', event => {
+  const control = event.target.closest('button:not(:disabled), [data-nav]:not([aria-disabled="true"])')
+  if (!control) return
+  control.classList.add('is-pressed')
+  window.setTimeout(() => control.classList.remove('is-pressed'), 180)
+})
+
 app.addEventListener('click', event => {
   const nav = event.target.closest('[data-nav]')
   if (nav) {
     event.preventDefault()
+    if (nav.disabled || nav.getAttribute('aria-disabled') === 'true') return
     navigate(nav.dataset.nav)
     return
   }
