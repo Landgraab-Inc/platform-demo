@@ -119,7 +119,7 @@ async function flushPendingSaves() {
 
 function showFatal(error) {
   console.error(error)
-  app.innerHTML = `<main class="shell"><section class="card"><h1>Ошибка запуска MVP</h1><div class="notice error">${esc(error?.message || error)}</div><p>Проверьте авторизацию, RLS и данные Supabase.</p></section></main>`
+  app.innerHTML = `<main class="shell"><section class="card"><h1>Не удалось загрузить данные</h1><div class="notice error">${esc(error?.message || error)}</div><p>Можно повторить загрузку. Если ошибка сохранится, проверьте авторизацию, RLS и доступность Supabase.</p><button class="btn" data-retry-boot>Повторить</button></section></main>`
 }
 
 async function boot() {
@@ -151,6 +151,7 @@ async function boot() {
   }
 
   state.profile = profile
+  app.innerHTML = '<main class="auth-shell"><section class="auth-panel card loading-card" role="status" aria-live="polite"><span class="badge">CENTRUM DEUTSCH</span><h2>Загружаем данные…</h2><p class="muted">Подготавливаем ваш кабинет.</p></section></main>'
   if (profile.role === 'student') state.data = await loadStudentData()
   if (profile.role === 'teacher') state.data = await loadTeacherData()
   if (profile.role === 'admin') state.data = await loadAdminData()
@@ -588,10 +589,13 @@ function sectionRow(section) {
   const done = activities.filter(activityComplete).length
   const started = activities.filter(activityStarted).length
   const current = resumeSection()?.id === section.id
-  const complete = activities.length > 0 && done === activities.length
-  const stateClass = complete ? 'done' : current ? 'current' : started ? 'started' : 'next'
-  const stateLabel = complete ? 'Готово' : started ? 'Черновик' : 'Не начато'
-  return `<button class="section-row ${stateClass}" data-nav="#/student/section/${esc(section.id)}"><span class="section-index">${section.ordinal}</span><span class="section-main"><strong>${esc(section.title)}</strong><span class="muted">${esc(section.duration_label || '')}</span></span><span class="section-state">${stateLabel} · ${done}/${activities.length}</span><span class="arrow">→</span></button>`
+  const deferredReview = section.id === 'A2.1-M01:review' && typeof p1ReviewItem === 'function' && p1ReviewItem() && !p1ReviewAvailable()
+  const complete = activities.length > 0 && done === activities.length && !deferredReview
+  const stateClass = complete ? 'done' : current ? 'current' : started || deferredReview ? 'started' : 'next'
+  const dueLabel = deferredReview ? new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'short'}).format(new Date(p1ReviewItem().due_at)) : ''
+  const stateLabel = deferredReview ? `Повторение ${dueLabel}` : complete ? 'Готово' : started ? 'Черновик' : 'Не начато'
+  const total = activities.length + (deferredReview ? 1 : 0)
+  return `<button class="section-row ${stateClass}" data-nav="#/student/section/${esc(section.id)}"><span class="section-index">${section.ordinal}</span><span class="section-main"><strong>${esc(section.title)}</strong><span class="muted">${esc(section.duration_label || '')}</span></span><span class="section-state">${stateLabel} · ${done}/${total}</span><span class="arrow">→</span></button>`
 }
 
 function renderStudentSection(sectionId) {
@@ -627,7 +631,7 @@ function renderStudentActivity(activity) {
   const attempt = attemptFor(activity.id)
   const status = activityStateLabel(activity)
   const header = `<div class="activity-head"><div><span class="activity-kicker">${esc(activity.skill || 'задание')}</span><h2>${esc(activity.title)}</h2></div><span class="activity-status ${activityComplete(activity) ? 'done' : ''}">${esc(status)}</span></div>`
-  const instruction = p.instruction ? `<p>${esc(p.instruction)}</p>` : ''
+  const instruction = `${p.instruction ? `<p class="task-instruction" lang="de">${esc(p.instruction)}</p>` : ''}${p.system_note ? `<p class="system-note">${esc(p.system_note)}</p>` : ''}`
   const prompt = p.prompt ? `<div class="prompt-box">${lines(p.prompt)}</div>` : ''
   const source = Array.isArray(p.source) ? `<div class="chat">${p.source.map(item => `<div class="bubble"><strong>${esc(item.speaker)}</strong><br><span lang="de">${esc(item.text)}</span></div>`).join('')}</div>` : ''
   const items = Array.isArray(p.items) ? `<div class="lex-list">${p.items.map(item => `<span>${esc(item)}</span>`).join('')}</div>` : ''
@@ -838,6 +842,8 @@ async function submitProject(activityId) {
     return
   }
 
+  setActivitySaveState(activityId, 'saving')
+  setSaveStatus(activityId, 'Отправляем преподавателю…')
   const payload = {
     student_id: state.profile.id,
     activity_id: activityId,
@@ -877,6 +883,8 @@ async function submitRevision(activityId, parentSubmissionId) {
     return
   }
 
+  setActivitySaveState(activityId, 'saving')
+  setSaveStatus(activityId, 'Отправляем доработанную версию…')
   const { data, error } = await supabase.from('submissions').insert({
     student_id: state.profile.id,
     activity_id: 'A2.1-M01:project',
@@ -901,8 +909,9 @@ async function saveStudentProgress(sectionId) {
     const acts = sectionActivities(section.id)
     const done = acts.filter(activityComplete).length
     const started = acts.filter(activityStarted).length
-    const status = acts.length && done === acts.length ? 'completed' : started ? 'in_progress' : 'not_started'
-    return [section.id, { status, done, total: acts.length }]
+    const deferredReview = section.id === 'A2.1-M01:review' && typeof p1ReviewItem === 'function' && p1ReviewItem() && !p1ReviewAvailable()
+    const status = deferredReview ? 'waiting' : acts.length && done === acts.length ? 'completed' : started ? 'in_progress' : 'not_started'
+    return [section.id, { status, done, total: acts.length + (deferredReview ? 1 : 0), ...(deferredReview ? { available_at: p1ReviewItem().due_at } : {}) }]
   }))
   const p = studentProgress(MODULE_ID)
   const row = {
@@ -1188,6 +1197,11 @@ app.addEventListener('click', event => {
     logout().catch(showFatal)
     return
   }
+  if (event.target.closest('[data-retry-boot]')) {
+    app.innerHTML = '<main class="auth-shell"><section class="auth-panel card loading-card" role="status" aria-live="polite"><h2>Повторяем загрузку…</h2></section></main>'
+    boot().catch(showFatal)
+    return
+  }
   const orderToken = event.target.closest('[data-order-token]')
   if (orderToken && state.profile?.role === 'student') {
     const activityId = orderToken.dataset.activityId
@@ -1340,5 +1354,183 @@ supabase.auth.onAuthStateChange(event => {
     renderAuth()
   }
 })
+
+/* P1 hardening: trajectory, schedules, actionable teacher views, deferred review. */
+const p1LoadStudentDataBase = loadStudentData
+loadStudentData = async function () {
+  const data = await p1LoadStudentDataBase()
+  const cohortIds = [...new Set(data.activeEnrollments.map(x => x.cohort_id).filter(Boolean))]
+  const moduleIds = data.modules.map(x => x.id)
+  const [liveSessions, moduleSessionTemplates, reviewItems, cohortTeachers] = await Promise.all([
+    cohortIds.length ? selectIn('live_sessions', 'id,module_id,module_session_id,cohort_id,teacher_id,ordinal,starts_at,duration_minutes,meeting_url,status,rescheduled_from_session_id,cancelled_at,cancellation_reason', 'cohort_id', cohortIds, 'starts_at') : [],
+    moduleIds.length ? selectIn('module_session_templates', 'id,module_id,ordinal,title,duration_minutes,teacher_plan,status', 'module_id', moduleIds, 'ordinal') : [],
+    moduleIds.length ? selectIn('review_items', 'id,student_id,module_id,source_activity_id,skill,due_at,interval_days,status,created_at', 'module_id', moduleIds, 'due_at') : [],
+    cohortIds.length ? selectIn('cohort_teachers', 'cohort_id,teacher_id,assigned_at', 'cohort_id', cohortIds) : []
+  ])
+  const teacherIds = [...new Set(cohortTeachers.map(x => x.teacher_id))]
+  const teacherProfiles = teacherIds.length ? await selectIn('app_users', 'id,display_name,email,role,status', 'id', teacherIds) : []
+  return { ...data, liveSessions, moduleSessionTemplates, reviewItems, cohortTeachers, teacherProfiles }
+}
+
+const p1LoadTeacherDataBase = loadTeacherData
+loadTeacherData = async function () {
+  const data = await p1LoadTeacherDataBase()
+  const cohortIds = data.cohorts.map(x => x.id)
+  const moduleIds = data.modules.map(x => x.id)
+  const [liveSessions, moduleSessionTemplates] = await Promise.all([
+    cohortIds.length ? selectIn('live_sessions', 'id,module_id,module_session_id,cohort_id,teacher_id,ordinal,starts_at,duration_minutes,meeting_url,status,rescheduled_from_session_id,cancelled_at,cancellation_reason', 'cohort_id', cohortIds, 'starts_at') : [],
+    moduleIds.length ? selectIn('module_session_templates', 'id,module_id,ordinal,title,duration_minutes,teacher_plan,status', 'module_id', moduleIds, 'ordinal') : []
+  ])
+  return { ...data, liveSessions, moduleSessionTemplates }
+}
+
+function p1ReviewItem() {
+  return state.data?.reviewItems?.find(x => x.module_id === MODULE_ID && x.source_activity_id === 'A2.1-M01:spaced-review' && x.status !== 'skipped') || null
+}
+function p1ReviewAvailable() {
+  const item = p1ReviewItem()
+  return Boolean(item && new Date(item.due_at).getTime() <= Date.now())
+}
+const p1StudentProgressBase = studentProgress
+studentProgress = function (moduleId = MODULE_ID) {
+  const progress = p1StudentProgressBase(moduleId)
+  const item = moduleId === MODULE_ID ? p1ReviewItem() : null
+  if (!item || p1ReviewAvailable()) return progress
+  const total = progress.total + 1
+  return { done: progress.done, total, percent: total ? Math.round(progress.done / total * 100) : 0 }
+}
+const p1SectionActivitiesBase = sectionActivities
+sectionActivities = function (sectionId) {
+  return p1SectionActivitiesBase(sectionId).filter(x => x.id !== 'A2.1-M01:spaced-review' || p1ReviewAvailable())
+}
+function p1Template(session) {
+  return state.data?.moduleSessionTemplates?.find(x => x.id === session.module_session_id) || state.data?.moduleSessionTemplates?.find(x => x.module_id === session.module_id && x.ordinal === session.ordinal)
+}
+function p1TeacherName(id) {
+  const t = state.data?.teacherProfiles?.find(x => x.id === id)
+  return t?.display_name || t?.email || 'Преподаватель'
+}
+function p1SessionStatus(status) { return ({planned:'Запланировано',completed:'Завершено',cancelled:'Отменено',rescheduled:'Перенесено'}[status] || status) }
+function p1SessionCard(session, role='student') {
+  const template = p1Template(session)
+  const cohort = state.data?.cohorts?.find(x => x.id === session.cohort_id)
+  const starts = session.starts_at ? new Date(session.starts_at) : null
+  const date = starts ? new Intl.DateTimeFormat('ru-RU',{weekday:'short',day:'2-digit',month:'short'}).format(starts) : 'Дата не назначена'
+  const time = starts ? new Intl.DateTimeFormat('ru-RU',{hour:'2-digit',minute:'2-digit'}).format(starts) : ''
+  const teacher = role === 'student' ? ` · ${esc(p1TeacherName(session.teacher_id))}` : ''
+  const link = session.meeting_url && session.status === 'planned' ? `<a class="btn secondary compact" href="${esc(session.meeting_url)}" target="_blank" rel="noreferrer">Видеозвонок</a>` : ''
+  return `<article class="scheduled-session"><div class="scheduled-session-date"><strong>${esc(date)}</strong><span>${esc(time)}</span></div><div class="scheduled-session-main"><span class="badge ${session.status === 'cancelled' ? 'gray' : ''}">${esc(p1SessionStatus(session.status))}</span><h3>${esc(template?.title || `Занятие ${session.ordinal}`)}</h3><p class="muted">${esc(cohort?.title || '')}${teacher} · ${Number(session.duration_minutes || template?.duration_minutes || 90)} минут</p></div><div class="scheduled-session-action">${link}</div></article>`
+}
+function renderStudentSchedule() {
+  const sessions = (state.data.liveSessions || []).slice().sort((a,b)=>String(a.starts_at||'').localeCompare(String(b.starts_at||'')))
+  const content = `<div class="eyebrow">ЛИЧНОЕ РАСПИСАНИЕ</div><h1>Занятия</h1><p class="lead muted">Конкретные даты вашей группы. Два занятия внутри модуля остаются частью учебной траектории.</p><section class="card"><h2>Расписание</h2>${sessions.length ? `<div class="schedule-list">${sessions.map(x=>p1SessionCard(x,'student')).join('')}</div>` : emptyState('Занятий пока нет','Когда для вашей группы появится дата, она будет показана здесь.')}</section>`
+  app.innerHTML = shell('student', content)
+}
+function renderTeacherSchedule() {
+  const sessions = (state.data.liveSessions || []).slice().sort((a,b)=>String(a.starts_at||'').localeCompare(String(b.starts_at||'')))
+  const content = `<div class="eyebrow">РАСПИСАНИЕ</div><h1>Ближайшие занятия</h1><p class="lead muted">Конкретные даты групп. Методические планы двух занятий находятся внутри модуля.</p><section class="card">${sessions.length ? `<div class="schedule-list">${sessions.map(x=>p1SessionCard(x,'teacher')).join('')}</div>` : emptyState('Занятий пока нет','Запланированные занятия появятся здесь после назначения дат.')}</section>`
+  app.innerHTML = shell('teacher', content)
+}
+const p1StudentRouteBase = renderStudentRoute
+renderStudentRoute = function (parts) { if ((parts[1] || 'home') === 'schedule') return renderStudentSchedule(); return p1StudentRouteBase(parts) }
+const p1TeacherRouteBase = renderTeacherRoute
+renderTeacherRoute = function (parts) { if ((parts[1] || 'home') === 'schedule') return renderTeacherSchedule(); return p1TeacherRouteBase(parts) }
+
+primaryNav = function (role, current) {
+  const courseActive = current.startsWith('#/student/courses') || current.startsWith('#/student/course') || current.startsWith('#/student/module') || current.startsWith('#/student/section')
+  const items = role === 'student' ? [['Личный кабинет','#/student/home',true,current==='#/student/home'],['Мои курсы','#/student/courses',true,courseActive],['Чтение','',false,false],['Словарь','',false,false],['Повторение','',false,false],['Встречи','#/student/schedule',true,current==='#/student/schedule'],['Мой профиль','',false,false]] : role === 'teacher' ? [['Обзор','#/teacher/home',true,current==='#/teacher/home'],['Материалы A2.1','#/teacher/module/A2.1-M01',true,current.startsWith('#/teacher/module')],['Мои ученики','#/teacher/students',true,current.startsWith('#/teacher/cohort')||current.startsWith('#/teacher/students')],['Расписание','#/teacher/schedule',true,current==='#/teacher/schedule']] : [['Обзор','#/admin/home',true,true],['Ученики и доступ','',false,false],['Расписание групп','',false,false],['Каталог материалов','',false,false],['Журнал изменений','',false,false]]
+  return items.map(([label,href,enabled,active]) => enabled ? `<button class="navlink ${active?'active':''}" data-nav="${href}" ${active?'aria-current="page"':''}><span>${esc(label)}</span></button>` : `<button class="navlink disabled" type="button" disabled aria-disabled="true"><span>${esc(label)}</span><small>позже</small></button>`).join('')
+}
+
+const p1StudentHomeBase = renderStudentHome
+renderStudentHome = function () {
+  p1StudentHomeBase()
+  const sessions = (state.data.liveSessions || []).filter(x=>x.status==='planned'&&x.starts_at&&new Date(x.starts_at).getTime()>=Date.now()).sort((a,b)=>new Date(a.starts_at)-new Date(b.starts_at))
+  const meeting = [...document.querySelectorAll('.rail .rail-card')].find(x=>x.textContent.includes('ВСТРЕЧИ'))
+  if (meeting) {
+    meeting.classList.remove('unavailable-card')
+    meeting.innerHTML = sessions[0] ? `<span class="rail-label">БЛИЖАЙШЕЕ ЗАНЯТИЕ</span>${p1SessionCard(sessions[0],'student')}<button class="inline-link" data-nav="#/student/schedule">Все занятия →</button>` : `<span class="rail-label">БЛИЖАЙШЕЕ ЗАНЯТИЕ</span><h3>Пока не назначено</h3><p class="muted">Когда для группы появится дата, она будет показана здесь.</p>`
+  }
+  const stat = document.querySelector('.stats .stat.muted-stat')
+  const item = p1ReviewItem()
+  if (stat && item) {
+    stat.classList.remove('muted-stat')
+    stat.innerHTML = p1ReviewAvailable() ? `<b>Повторение</b><span>Доступно сейчас.</span><button class="inline-link" data-nav="#/student/section/A2.1-M01:review">Перейти →</button>` : `<b>Повторение</b><span>Будет доступно ${esc(new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'short'}).format(new Date(item.due_at)))}.</span><span class="unavailable-label">интервальное повторение</span>`
+  }
+}
+function p1TrajectorySession(n) {
+  const t = state.data.moduleSessionTemplates?.find(x=>x.module_id===MODULE_ID&&x.ordinal===n)
+  return `<article class="trajectory-session"><div><span class="badge">Занятие ${n}</span><h3>${esc(t?.title || `Занятие ${n}`)}</h3><p class="muted">Часть модуля · ${Number(t?.duration_minutes || 90)} минут</p></div><span class="trajectory-session-note">Дата — в личном расписании</span></article>`
+}
+const p1StudentModuleBase = renderStudentModule
+renderStudentModule = function (moduleId) {
+  p1StudentModuleBase(moduleId)
+  const module = state.data.modules.find(x=>x.id===moduleId); if (!module) return
+  const sections = moduleSections(module.id), list = document.querySelector('.section-list')
+  if (list) {
+    list.classList.add('module-trajectory')
+    const rows = xs => xs.map(x=>`<div class="trajectory-step">${sectionRow(x)}</div>`).join('')
+    list.innerHTML = `${rows(sections.filter(x=>x.ordinal<=4))}${p1TrajectorySession(1)}${rows(sections.filter(x=>x.ordinal>=5&&x.ordinal<=7))}${p1TrajectorySession(2)}${rows(sections.filter(x=>x.ordinal>=8))}`
+  }
+  const h=[...document.querySelectorAll('.section-heading.spaced')].find(x=>x.textContent.includes('Занятия в структуре модуля')); if(h){h.nextElementSibling?.remove();h.remove()}
+}
+function p1LatestActivity(studentId) {
+  return [...state.data.attempts.filter(x=>x.student_id===studentId).map(x=>x.checked_at||x.submitted_at||x.started_at),...state.data.submissions.filter(x=>x.student_id===studentId).map(x=>x.submitted_at||x.created_at)].filter(Boolean).sort((a,b)=>new Date(b)-new Date(a))[0] || null
+}
+function p1Signals() {
+  const out=[]
+  for(const student of state.data.students){
+    const old = state.data.submissions.some(x=>x.student_id===student.id&&['submitted','in_review'].includes(x.status)&&new Date(x.submitted_at||x.created_at).getTime()<Date.now()-48*60*60*1000)
+    const p = state.data.progress.find(x=>x.student_id===student.id&&x.module_id===MODULE_ID)
+    if(old) out.push({student,text:'Работа ждёт проверки больше 48 часов'})
+    if(p?.updated_at&&new Date(p.updated_at).getTime()<Date.now()-7*24*60*60*1000) out.push({student,text:'Нет значимой активности больше 7 дней'})
+  }
+  return out
+}
+const p1TeacherHomeBase = renderTeacherHome
+renderTeacherHome = function () {
+  p1TeacherHomeBase()
+  const content=document.querySelector('.content-column')||document.querySelector('.main-view'); if(!content)return
+  const sessions=(state.data.liveSessions||[]).filter(x=>x.status==='planned'&&x.starts_at&&new Date(x.starts_at)>=new Date()).sort((a,b)=>new Date(a.starts_at)-new Date(b.starts_at))
+  const signals=p1Signals(), before=content.querySelector('.section-heading')
+  if(before) before.insertAdjacentHTML('beforebegin',`<section class="teacher-action-grid"><div class="card"><div class="section-heading"><h2>Ближайшие занятия</h2><button class="inline-link" data-nav="#/teacher/schedule">Расписание →</button></div>${sessions.length?`<div class="schedule-list">${sessions.slice(0,3).map(x=>p1SessionCard(x,'teacher')).join('')}</div>`:emptyState('Занятий пока нет','Даты появятся после создания scheduled session.')}</div><div class="card"><div class="section-heading"><h2>Требуют внимания</h2></div>${signals.length?`<div class="signal-list">${signals.slice(0,5).map(x=>`<div class="signal-row"><strong>${esc(x.student.display_name||x.student.email||'Ученик')}</strong><span>${esc(x.text)}</span></div>`).join('')}</div>`:'<p class="muted">Критичных сигналов сейчас нет.</p>'}</div></section>`)
+}
+const p1TeacherCohortBase = renderTeacherCohort
+renderTeacherCohort = function (cohortId) {
+  p1TeacherCohortBase(cohortId)
+  const cohort=state.data.cohorts.find(x=>x.id===cohortId), list=document.querySelector('.student-list'); if(!cohort||!list)return
+  const links=state.data.cohortStudents.filter(x=>x.cohort_id===cohort.id)
+  list.innerHTML=links.map(link=>{
+    const student=state.data.students.find(x=>x.id===link.student_id), p=state.data.progress.find(x=>x.student_id===link.student_id&&x.module_id===MODULE_ID), section=state.data.sections.find(x=>x.id===p?.current_section_id), pending=state.data.submissions.filter(x=>x.student_id===link.student_id&&['submitted','in_review'].includes(x.status)), last=p1LatestActivity(link.student_id)
+    return `<article class="student-action-row"><div class="student-action-main"><strong>${esc(student?.display_name||student?.email||'Ученик')}</strong><span class="muted">${esc(student?.email||'')}</span></div><div><span class="row-label">Где остановился</span><strong>${esc(section?.title||'Модуль не начат')}</strong></div><div><span class="row-label">Реакция</span>${pending.length?`<span class="status-pill warn">${pending.length} ждёт проверки</span>`:'<span class="muted">Не требуется</span>'}</div><div><span class="row-label">Последняя активность</span><span>${last?esc(formatDate(last)):'—'}</span></div><details class="student-detail"><summary>Подробнее</summary><div class="student-detail-grid"><span>Прогресс: ${Math.round(Number(p?.completion_percent||0))}%</span><span>Попыток: ${state.data.attempts.filter(x=>x.student_id===link.student_id).length}</span><span>Отправок: ${state.data.submissions.filter(x=>x.student_id===link.student_id).length}</span></div><pre class="state-json">${esc(JSON.stringify(p?.section_states||{},null,2))}</pre></details></article>`
+  }).join('')||emptyState('В группе нет учеников','Назначение учеников выполняется через серверные операции.')
+}
+const p1TeacherModuleBase = renderTeacherModule
+renderTeacherModule = function (moduleId) {
+  p1TeacherModuleBase(moduleId)
+  const h=[...document.querySelectorAll('.section-heading.spaced')].find(x=>x.textContent.includes('Планы занятий'))
+  if(h) h.innerHTML='<h2>Планы двух занятий модуля</h2><span class="muted">Методические планы · даты конкретных групп — в расписании</span>'
+  const grid = document.querySelector('.session-grid')
+  const templates = (state.data.moduleSessionTemplates || []).filter(x=>x.module_id===moduleId).sort((a,b)=>a.ordinal-b.ordinal)
+  if(grid && templates.length) {
+    grid.innerHTML = templates.map(t=>`<details class="session-card disclosure"><summary>${esc(t.title)}</summary><p class="muted">Часть модуля · ${Number(t.duration_minutes || 90)} минут</p><ul>${(t.teacher_plan?.items || []).map(item=>`<li>${esc(item)}</li>`).join('')}</ul></details>`).join('')
+  }
+}
+const p1StudentSectionBase = renderStudentSection
+renderStudentSection = function (sectionId) {
+  p1StudentSectionBase(sectionId)
+  const item = p1ReviewItem()
+  if (sectionId !== 'A2.1-M01:review' || !item || p1ReviewAvailable()) return
+  const stack = document.querySelector('.activity-stack')
+  if (!stack) return
+  const due = new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'long'}).format(new Date(item.due_at))
+  stack.insertAdjacentHTML('beforeend', `<div class="notice deferred-review"><strong>Интервальное повторение откроется ${esc(due)}.</strong><br>Оно не показывается как обычное следующее задание до нужного интервала.</div>`)
+}
+const p1StudentActivityBase = renderStudentActivity
+renderStudentActivity = function (activity) {
+  let html=p1StudentActivityBase(activity)
+  if(activity.type==='listening_text') html=html.replace('<div class="audio-panel">','<div class="listening-phase"><span class="phase-label">1 · Gist</span><p>Worum geht es in der Nachricht?</p><span class="phase-label">2 · Selective listening</span><p>Notiere Tag, Uhrzeit und Grund.</p></div><div class="audio-panel">')
+  return html
+}
 
 boot().catch(showFatal)
