@@ -807,12 +807,13 @@ function emptyState(title, text) {
   return `<div class="empty-state"><h3>${esc(title)}</h3><p>${esc(text)}</p></div>`
 }
 
-async function login(event) {
-  event.preventDefault()
-  const fd = new FormData(event.currentTarget)
-  const button = event.currentTarget.querySelector('button[type="submit"]')
-  button.disabled = true
-  button.textContent = 'Входим…'
+async function login(form) {
+  const fd = new FormData(form)
+  const button = form.querySelector('button[type="submit"]')
+  if (button) {
+    button.disabled = true
+    button.textContent = 'Входим…'
+  }
   const { error } = await supabase.auth.signInWithPassword({ email: fd.get('email'), password: fd.get('password') })
   if (error) {
     renderAuth(error.message)
@@ -940,8 +941,11 @@ app.addEventListener('input', event => {
 })
 
 app.addEventListener('submit', event => {
-  if (event.target.id === 'login-form') login(event).catch(showFatal)
-  else event.preventDefault()
+  event.preventDefault()
+  const form = event.target
+  if (form instanceof HTMLFormElement && form.id === 'login-form') {
+    login(form).catch(showFatal)
+  }
 })
 
 window.addEventListener('hashchange', () => {
