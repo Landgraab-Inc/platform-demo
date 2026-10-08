@@ -310,8 +310,8 @@ p{margin-bottom:14px}
 .loading-card{max-width:460px}
 .module-trajectory{display:grid;gap:10px}
 .trajectory-step .section-row{width:100%}
-.trajectory-session{display:flex;justify-content:space-between;gap:18px;align-items:center;border:1px solid #d9cfea;background:#f8f5fb;border-radius:14px;padding:17px 18px;margin:4px 0 8px}
-.trajectory-session h3{margin:6px 0 3px}.trajectory-session p{margin:0}.trajectory-session-note{font-size:13px;color:var(--muted);text-align:right}
+.trajectory-session{display:flex;justify-content:space-between;gap:16px;align-items:center;border:1px solid #d9cfea;background:#f8f5fb;border-radius:12px;padding:12px 14px;margin:3px 0 6px}
+.trajectory-session-main{display:grid;gap:2px}.trajectory-session h3{margin:0;font-size:16px}.trajectory-session p{margin:0;font-size:13px}.trajectory-session-action{flex:0 0 auto}
 .scheduled-session{display:grid;grid-template-columns:112px minmax(0,1fr) auto;gap:16px;align-items:center;padding:14px 0;border-bottom:1px solid var(--line)}
 .scheduled-session:last-child{border-bottom:0}.scheduled-session-date{display:grid;gap:3px}.scheduled-session-date span{color:var(--muted)}
 .scheduled-session-main h3{margin:5px 0 3px;font-size:18px}.scheduled-session-main p{margin:0}.scheduled-session-action{min-width:0}
@@ -320,7 +320,7 @@ p{margin-bottom:14px}
 .teacher-action-grid .card{margin:0}.signal-list{display:grid;gap:10px}.signal-row{display:grid;gap:3px;padding:10px 0;border-bottom:1px solid var(--line)}.signal-row:last-child{border-bottom:0}
 .student-action-row{display:grid;grid-template-columns:minmax(180px,1.3fr) minmax(170px,1fr) minmax(150px,.8fr) minmax(140px,.8fr);gap:14px;padding:18px 0;border-bottom:1px solid var(--line);align-items:start}
 .student-action-main{display:grid}.row-label{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
-.student-detail{grid-column:1/-1}.student-detail summary{cursor:pointer;color:var(--purple-dark);font-weight:650}.student-detail-grid{display:flex;gap:18px;flex-wrap:wrap;padding:12px 0 6px}.state-json{white-space:pre-wrap;overflow:auto;max-height:180px;background:#f8f6fa;padding:10px;border-radius:9px;font-size:12px}
+.student-detail{grid-column:1/-1}.student-detail summary{cursor:pointer;color:var(--purple-dark);font-weight:650}.student-detail-block{padding:12px 0 4px}.student-section-progress{display:grid;gap:0;margin-top:10px;border-top:1px solid var(--line)}.student-section-progress>div{display:flex;justify-content:space-between;gap:18px;padding:8px 0;border-bottom:1px solid var(--line)}.student-section-progress>div span:last-child{white-space:nowrap}.student-detail-metrics{margin:12px 0 0}
 .listening-phase{border-left:3px solid var(--purple);padding:10px 14px;margin:12px 0;background:#faf8fc}.listening-phase p{margin:3px 0 10px}.phase-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--purple-dark);font-weight:750}
 .footeractions{margin-top:30px;margin-bottom:16px}.footeractions + .small.muted{margin-top:14px;line-height:1.5}
 .activity-actions{row-gap:10px}.activity-actions .save-status{flex-basis:100%;margin-top:2px}
@@ -328,8 +328,8 @@ p{margin-bottom:14px}
 @media(max-width:960px){.teacher-action-grid{grid-template-columns:1fr}.student-action-row{grid-template-columns:1fr 1fr}}
 @media(max-width:760px){
   .scheduled-session{grid-template-columns:1fr;gap:8px}.scheduled-session-action{justify-self:start}
-  .trajectory-session{align-items:flex-start;flex-direction:column}.trajectory-session-note{text-align:left}
-  .student-action-row{grid-template-columns:1fr}.student-detail{grid-column:auto}
+  .trajectory-session{align-items:flex-start;flex-direction:column;gap:8px}.trajectory-session-action{min-height:44px}
+  .student-action-row{grid-template-columns:1fr}.student-detail{grid-column:auto}.student-section-progress>div{align-items:flex-start}.student-section-progress>div span:last-child{white-space:normal;text-align:right}
   .footeractions{display:grid;grid-template-columns:1fr;gap:12px}.footeractions .btn{width:100%;min-height:48px;white-space:normal;text-align:center}
   .activity-card{padding:18px}.activity-actions .btn{min-height:48px;white-space:normal}
   .lessonbody>.small.muted{padding:0 2px 8px}
@@ -344,3 +344,40 @@ p{margin-bottom:14px}
 .review-mode{display:inline-flex;align-items:center;min-height:28px;padding:5px 9px;border-radius:8px;background:#f3f0f7;color:var(--purple-dark);font-size:12px;font-weight:750;margin:0 0 10px}
 .system-note{margin:0 0 14px}
 @media(max-width:760px){.task-instruction{font-size:20px}.activity-title{font-size:16px!important}}
+
+
+/* Minimal Admin MVP */
+.admin-action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.admin-action-card{text-align:left;margin:0;cursor:pointer;min-height:190px;display:flex;flex-direction:column;align-items:flex-start}
+.admin-action-card h2{font-size:24px;margin:4px 0 8px}.admin-action-card p{color:var(--muted)}.admin-action-card .card-link{margin-top:auto}
+.admin-user-list,.admin-section-stack,.admin-activity-list,.admin-module-links{display:grid;gap:10px}
+.admin-user-row{display:grid;grid-template-columns:minmax(220px,1.5fr) minmax(135px,.7fr) minmax(150px,.7fr) auto;gap:12px;align-items:end;padding:14px 0;border-bottom:1px solid var(--line)}
+.admin-user-row:last-child{border-bottom:0}.admin-user-main{display:grid;gap:2px}
+.compact-field{display:grid;gap:5px}.compact-field span{font-size:11px;font-weight:750;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.compact-field select,.field select{width:100%;min-height:44px;border:1px solid #c9c3d1;border-radius:9px;padding:8px 11px;background:#fff;color:var(--ink)}
+.admin-form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.admin-form-grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.admin-form-actions{grid-column:1/-1;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:4px}
+.admin-course-card{display:grid;grid-template-columns:minmax(220px,.7fr) minmax(0,1.3fr);gap:22px;align-items:start}
+.admin-course-card h2{margin:10px 0 7px}.admin-module-links .module-card{min-height:72px}
+.admin-section summary{display:flex;justify-content:space-between;align-items:center;gap:12px}.admin-section summary span{display:grid;gap:3px}.admin-section summary small{color:var(--muted);font-weight:500}
+.admin-activity-row{display:grid;grid-template-columns:34px minmax(0,1fr) auto auto auto;gap:10px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.admin-activity-row>div:nth-child(2){display:grid;gap:2px}.activity-order{display:grid;place-items:center;width:30px;height:30px;border-radius:8px;background:var(--soft);font-size:12px;font-weight:800}
+.admin-order-actions{display:flex;gap:2px}.admin-order-actions .btn{min-width:40px}
+.admin-add-link{margin-top:14px}.muted-status{opacity:.65}
+.admin-editor-card{max-width:840px}.admin-lifecycle{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}
+.admin-preview{max-width:840px;margin-top:26px}.admin-preview .activity-card{box-shadow:0 8px 26px rgba(45,35,60,.04)}.admin-preview button:disabled,.admin-preview input:disabled,.admin-preview textarea:disabled{opacity:.78}
+.admin-preview textarea:disabled,.admin-preview input:disabled{background:#fbfafc;color:var(--ink)}
+@media(max-width:980px){.admin-user-row{grid-template-columns:minmax(180px,1fr) 1fr 1fr}.admin-user-row>.btn{grid-column:2}.admin-course-card{grid-template-columns:1fr}.admin-form-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:760px){
+  .admin-action-grid,.admin-form-grid,.admin-form-grid.two{grid-template-columns:1fr}
+  .admin-user-row{grid-template-columns:1fr;align-items:stretch}.admin-user-row>.btn{grid-column:auto;width:100%}
+  .admin-activity-row{grid-template-columns:30px minmax(0,1fr) auto}.admin-activity-row>.status-pill{grid-column:2}.admin-order-actions{grid-column:2}.admin-activity-row>.btn{grid-column:3;grid-row:1/3}
+  .admin-lifecycle{display:grid}.admin-lifecycle .btn{width:100%}
+}
+
+
+/* Focused platform UX/content cleanup */
+.schedule-card{padding-top:8px}
+.admin-meta-line{display:flex;gap:18px;flex-wrap:wrap;margin:4px 0 10px;padding:10px 12px;border-radius:9px;background:#f8f6fa;color:var(--muted);font-size:13px}
+@media(max-width:900px){.trajectory-session{padding:11px 13px}.student-action-row{gap:11px}}
+@media(max-width:760px){.schedule-card{padding:8px 14px 14px}.admin-meta-line{display:grid;gap:5px}}
