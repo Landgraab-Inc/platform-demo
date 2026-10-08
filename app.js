@@ -630,15 +630,15 @@ function renderStudentSection(sectionId) {
 }
 
 function activityReviewLabel(activity) {
-  const mode = задание?.grading?.mode
-  if (задание?.teacher_review_required || mode === 'teacher_review') return 'Проверит преподаватель'
+  const mode = activity?.grading?.mode
+  if (activity?.teacher_review_required || mode === 'teacher_review') return 'Проверит преподаватель'
   if (mode === 'auto') return 'Проверяется автоматически'
   if (mode === 'model_answer' || mode === 'acknowledge') return 'Сверь с образцом'
   return 'Самопроверка'
 }
 
 function activitySaveLabel(activity) {
-  return задание?.teacher_review_required || задание?.grading?.mode === 'teacher_review'
+  return activity?.teacher_review_required || activity?.grading?.mode === 'teacher_review'
     ? 'Сохранить черновик'
     : 'Сохранить'
 }
@@ -995,7 +995,7 @@ function teacherCohortCard(cohort) {
 function teacherSubmissionRow(submission) {
   const student = state.data.students.find(x => x.id === submission.student_id)
   const activity = state.data.activities.find(x => x.id === submission.activity_id)
-  return `<button class="queue-row" data-nav="#/teacher/submission/${esc(submission.id)}"><div><strong>${esc(student?.display_name || student?.email || 'Ученик')}</strong><span>${esc(задание?.title || submission.activity_id)}</span></div><div><span class="status-pill">${esc(submissionLabel(submission.status))}</span><small>${formatDate(submission.submitted_at || submission.created_at)}</small></div><span class="arrow">→</span></button>`
+  return `<button class="queue-row" data-nav="#/teacher/submission/${esc(submission.id)}"><div><strong>${esc(student?.display_name || student?.email || 'Ученик')}</strong><span>${esc(activity?.title || submission.activity_id)}</span></div><div><span class="status-pill">${esc(submissionLabel(submission.status))}</span><small>${formatDate(submission.submitted_at || submission.created_at)}</small></div><span class="arrow">→</span></button>`
 }
 
 function renderTeacherCohort(cohortId) {
@@ -1018,8 +1018,8 @@ function renderTeacherSubmission(submissionId) {
   const student = state.data.students.find(x => x.id === submission.student_id)
   const activity = state.data.activities.find(x => x.id === submission.activity_id)
   const existing = state.data.reviews.find(x => x.submission_id === submission.id && x.status === 'published')
-  const requirement = задание?.payload?.word_target ? `${esc(activity.payload.word_target)} Wörter` : '40–60 Wörter'
-  const task = задание?.payload?.instruction || 'Подтверди договорённость: причина изменения, новое время, место и просьба ответить.'
+  const requirement = activity?.payload?.word_target ? `${esc(activity.payload.word_target)} Wörter` : '40–60 Wörter'
+  const task = activity?.payload?.instruction || 'Подтверди договорённость: причина изменения, новое время, место и просьба ответить.'
   const rubricFields = [
     ['task', 'Задача выполнена'],
     ['agreement', 'Договорённость понятна'],
@@ -1468,7 +1468,7 @@ function resetSpeechControl(activityId = state.speechActivityId) {
 
 function playSpeech(activityId) {
   const activity = state.data.activities.find(x => x.id === activityId)
-  const text = задание?.payload?.speech_text
+  const text = activity?.payload?.speech_text
   if (!text || !('speechSynthesis' in window)) return
   const button = document.querySelector(`[data-play-speech="${cssEscape(activityId)}"]`)
 
@@ -1583,7 +1583,7 @@ app.addEventListener('click', event => {
     if (!order.includes(index)) order.push(index)
     if (hidden) hidden.value = JSON.stringify(order)
     const activity = state.data.activities.find(item => item.id === activityId)
-    const tokens = задание?.payload?.tokens || []
+    const tokens = activity?.payload?.tokens || []
     if (answer) answer.innerHTML = order.map((tokenIndex, position) => `<button class="order-built-token" type="button" data-order-remove="${position}" data-activity-id="${esc(activityId)}">${esc(tokens[tokenIndex] || '')}</button>`).join('')
     setActivitySaveState(activityId, 'pending')
     saveActivity(activityId, false).catch(showFatal)
@@ -1598,7 +1598,7 @@ app.addEventListener('click', event => {
     order.splice(Number(orderRemove.dataset.orderRemove), 1)
     if (hidden) hidden.value = JSON.stringify(order)
     const activity = state.data.activities.find(item => item.id === activityId)
-    const tokens = задание?.payload?.tokens || []
+    const tokens = activity?.payload?.tokens || []
     const answer = document.querySelector(`[data-order-answer="${cssEscape(activityId)}"]`)
     if (answer) answer.innerHTML = order.length ? order.map((tokenIndex, position) => `<button class="order-built-token" type="button" data-order-remove="${position}" data-activity-id="${esc(activityId)}">${esc(tokens[tokenIndex] || '')}</button>`).join('') : '<span class="muted">Нажимай слова по порядку.</span>'
     setActivitySaveState(activityId, 'pending')
