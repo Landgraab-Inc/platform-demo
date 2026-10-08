@@ -302,3 +302,37 @@ p{margin-bottom:14px}
   .review-context>div:nth-child(2),.review-context>div:nth-child(4){grid-column:auto}
   .rubric-list{grid-template-columns:1fr}
 }
+
+
+/* P1 hardening */
+.task-instruction{font-weight:700;margin-bottom:8px}
+.system-note{margin:-2px 0 14px;color:var(--muted);font-size:14px;line-height:1.45}
+.loading-card{max-width:460px}
+.module-trajectory{display:grid;gap:10px}
+.trajectory-step .section-row{width:100%}
+.trajectory-session{display:flex;justify-content:space-between;gap:18px;align-items:center;border:1px solid #d9cfea;background:#f8f5fb;border-radius:14px;padding:17px 18px;margin:4px 0 8px}
+.trajectory-session h3{margin:6px 0 3px}.trajectory-session p{margin:0}.trajectory-session-note{font-size:13px;color:var(--muted);text-align:right}
+.scheduled-session{display:grid;grid-template-columns:112px minmax(0,1fr) auto;gap:16px;align-items:center;padding:14px 0;border-bottom:1px solid var(--line)}
+.scheduled-session:last-child{border-bottom:0}.scheduled-session-date{display:grid;gap:3px}.scheduled-session-date span{color:var(--muted)}
+.scheduled-session-main h3{margin:5px 0 3px;font-size:18px}.scheduled-session-main p{margin:0}.scheduled-session-action{min-width:0}
+.btn.compact{padding:8px 12px;font-size:14px}.schedule-list{display:grid}
+.teacher-action-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(260px,.75fr);gap:18px;margin:22px 0}
+.teacher-action-grid .card{margin:0}.signal-list{display:grid;gap:10px}.signal-row{display:grid;gap:3px;padding:10px 0;border-bottom:1px solid var(--line)}.signal-row:last-child{border-bottom:0}
+.student-action-row{display:grid;grid-template-columns:minmax(180px,1.3fr) minmax(170px,1fr) minmax(150px,.8fr) minmax(140px,.8fr);gap:14px;padding:18px 0;border-bottom:1px solid var(--line);align-items:start}
+.student-action-main{display:grid}.row-label{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.student-detail{grid-column:1/-1}.student-detail summary{cursor:pointer;color:var(--purple-dark);font-weight:650}.student-detail-grid{display:flex;gap:18px;flex-wrap:wrap;padding:12px 0 6px}.state-json{white-space:pre-wrap;overflow:auto;max-height:180px;background:#f8f6fa;padding:10px;border-radius:9px;font-size:12px}
+.listening-phase{border-left:3px solid var(--purple);padding:10px 14px;margin:12px 0;background:#faf8fc}.listening-phase p{margin:3px 0 10px}.phase-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--purple-dark);font-weight:750}
+.footeractions{margin-top:30px;margin-bottom:16px}.footeractions + .small.muted{margin-top:14px;line-height:1.5}
+.activity-actions{row-gap:10px}.activity-actions .save-status{flex-basis:100%;margin-top:2px}
+.mobile-section-nav summary{min-height:48px;display:flex;align-items:center}
+@media(max-width:960px){.teacher-action-grid{grid-template-columns:1fr}.student-action-row{grid-template-columns:1fr 1fr}}
+@media(max-width:760px){
+  .scheduled-session{grid-template-columns:1fr;gap:8px}.scheduled-session-action{justify-self:start}
+  .trajectory-session{align-items:flex-start;flex-direction:column}.trajectory-session-note{text-align:left}
+  .student-action-row{grid-template-columns:1fr}.student-detail{grid-column:auto}
+  .footeractions{display:grid;grid-template-columns:1fr;gap:12px}.footeractions .btn{width:100%;min-height:48px;white-space:normal;text-align:center}
+  .activity-card{padding:18px}.activity-actions .btn{min-height:48px;white-space:normal}
+  .lessonbody>.small.muted{padding:0 2px 8px}
+}
+
+.rail-card .scheduled-session{grid-template-columns:1fr;gap:7px;padding:10px 0}.rail-card .scheduled-session-main h3{font-size:16px}.rail-card .scheduled-session-action{justify-self:start}.deferred-review{margin-top:14px}
