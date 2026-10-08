@@ -28,13 +28,13 @@ const state = {
 const SECTION_COPY = {
   start: ['Разогрев и повторение', 'Актуализируй знакомые модели A1 и проверь, что готов двигаться дальше.'],
   grammar: ['Новая грамматика', 'Сравни weil и denn и отработай позицию личного глагола.'],
-  vocab: ['Лексика и произношение', 'Собери устойчивые сочетания для встречи, времени и переноса планов.'],
+  vocab: ['Wortschatz und Aussprache', ''],
   reading: ['Чтение', 'Пойми, как участники меняют договорённость и какие ограничения влияют на решение.'],
   practice: ['Закрепление', 'Перейди от модели к собственным формулировкам и выбору общего времени.'],
-  listening: ['Аудирование', 'Услышь новое время, место и причину переноса в голосовом сообщении.'],
-  speaking: ['Речь и взаимодействие', 'Сначала отрепетируй реплику, затем отреагируй на изменение условия.'],
-  project: ['Творческая задача', 'Собери итоговую договорённость и отправь письменную часть преподавателю.'],
-  feedback: ['Обратная связь', 'Сопоставь результат с целью и подготовь улучшенную версию.'],
+  listening: ['Hören', ''],
+  speaking: ['Sprechen und Interaktion', ''],
+  project: ['Abschlussaufgabe', ''],
+  feedback: ['Обратная связь', ''],
   review: ['Повторение и перенос', 'Используй те же средства в новой ситуации без старого образца.']
 }
 
@@ -245,6 +245,7 @@ function routeParts() {
 }
 
 async function navigate(hash) {
+  if ('speechSynthesis' in window) speechSynthesis.cancel()
   if (state.profile?.role === 'student' && location.hash !== hash) {
     const saved = await flushPendingSaves()
     if (!saved) return false
@@ -255,6 +256,7 @@ async function navigate(hash) {
 }
 
 function renderRoute() {
+  if ('speechSynthesis' in window) speechSynthesis.cancel()
   if (!state.profile || !state.data) return
   const parts = routeParts()
   const role = state.profile.role
@@ -278,7 +280,7 @@ function commonHeader(extra = '') {
   return `<header class="topbar">
     <div>
       <div class="breadcrumb">${roleWorkspaceLabel(state.profile.role)}</div>
-      <div class="saveflag">${state.profile.role === 'student' ? 'Прогресс и ответы сохраняются на сервере' : 'Рабочее пространство · MVP'}</div>
+      <div class="saveflag">${state.profile.role === 'student' ? 'Прогресс и ответы сохраняются на сервере' : ''}</div>
     </div>
     <div class="topright">
       ${extra}
@@ -354,7 +356,7 @@ function shell(role, content, aside = '', options = {}) {
         ${lessonSidebar(current)}
       </div>
       <div class="sidebar-bottom">
-        <div class="small muted">${role === 'student' ? 'Свой ритм. Свои результаты.' : 'Рабочее пространство'}<br>MVP · A2.1-M01</div>
+        <div class="small muted">${role === 'student' ? 'Свой ритм. Свои результаты.' : 'Рабочее пространство'}<br>A2.1</div>
       </div>
     </aside>
     <div class="mainwrap">
@@ -606,9 +608,8 @@ function renderStudentSection(sectionId) {
   const activities = sectionActivities(section.id)
   const idx = sections.findIndex(x => x.id === section.id)
   const copy = SECTION_COPY[section.legacy_key] || [section.title, '']
-  const content = `<div class="breadcrumbs"><button data-nav="#/student/course/${esc(module.course_id)}">${esc(module.course_id)}</button><span>›</span><button data-nav="#/student/module/${esc(module.id)}">${esc(module.title)}</button><span>›</span><span>${esc(section.title)}</span></div>
-    <div class="lessonhead">
-      <div class="inline"><span class="badge green">${esc(module.course_id)} · Модуль ${String(module.ordinal).padStart(2, '0')}</span><span class="small muted">${esc(module.title)}</span></div>
+  const content = `<div class="lessonhead">
+      <div class="inline"><span class="badge green">${esc(module.course_id)} · Модуль ${String(module.ordinal).padStart(2, '0')}</span></div>
       <h1>${esc(copy[0])}</h1>
       <div class="keyinfo"><span>Шаг ${idx + 1} из ${sections.length}</span><span>${esc(section.duration_label || '')}</span><span>${activities.length} задан${activities.length === 1 ? 'ие' : 'ия'}</span></div>
       ${copy[1] ? `<p class="lead muted">${esc(copy[1])}</p>` : ''}
@@ -620,7 +621,7 @@ function renderStudentSection(sectionId) {
         ${idx > 0 ? `<button class="btn secondary" data-nav="#/student/section/${esc(sections[idx - 1].id)}">← ${esc(sections[idx - 1].title)}</button>` : `<button class="btn secondary" data-nav="#/student/module/${esc(module.id)}">К плану модуля</button>`}
         ${idx < sections.length - 1 ? `<button class="btn" data-nav="#/student/section/${esc(sections[idx + 1].id)}">${esc(sections[idx + 1].title)} →</button>` : `<button class="btn" data-nav="#/student/module/${esc(module.id)}">К структуре модуля</button>`}
       </div>
-      <p class="small muted">Ответы и прогресс сохраняются отдельно. Переход между разделами не означает автоматического освоения навыка.</p>
+
     </div>`
   app.innerHTML = shell('student', content)
   saveStudentProgress(section.id).catch(console.error)
@@ -644,8 +645,8 @@ function renderStudentActivity(activity) {
   const p = activity.payload || {}
   const attempt = attemptFor(activity.id)
   const status = activityStateLabel(activity)
-  const header = `<div class="activity-head"><div><span class="activity-kicker">${esc(activity.skill || 'задание')}</span><h2 class="activity-title">${esc(activity.title)}</h2></div><span class="activity-status ${activityComplete(activity) ? 'done' : ''}">${esc(status)}</span></div>`
-  const instruction = `${p.instruction ? `<p class="task-instruction" lang="de">${esc(p.instruction)}</p>` : ''}<div class="review-mode">${esc(activityReviewLabel(activity))}</div>${p.system_note ? `<p class="system-note">${esc(p.system_note)}</p>` : ''}`
+  const header = `<div class="activity-head"><div>${!p.instruction ? `<h2 class="activity-title">${esc(activity.title)}</h2>` : ''}</div><span class="activity-status ${activityComplete(activity) ? 'done' : ''}">${esc(status)}</span></div>`
+  const instruction = `${p.instruction ? `<p class="task-instruction" lang="de">${esc(p.instruction)}</p>` : ''}<div class="review-mode">${esc(activityReviewLabel(activity))}</div>${p.system_note && activity.type !== 'speaking_reflection' && !activity.id.endsWith(':project') ? `<p class="system-note">${esc(p.system_note)}</p>` : ''}`
   const prompt = p.prompt ? `<div class="prompt-box">${lines(p.prompt)}</div>` : ''
   const source = Array.isArray(p.source) ? `<div class="chat">${p.source.map(item => `<div class="bubble"><strong>${esc(item.speaker)}</strong><br><span lang="de">${esc(item.text)}</span></div>`).join('')}</div>` : ''
   const items = Array.isArray(p.items) ? `<div class="lex-list">${p.items.map(item => `<span>${esc(item)}</span>`).join('')}</div>` : ''
@@ -683,17 +684,17 @@ function renderStudentActivity(activity) {
   }
 
   const value = state.pendingDrafts.has(activity.id) ? state.pendingDrafts.get(activity.id) : (attempt?.answer?.text || '')
-  const listening = activity.type === 'listening_text' ? `<div class="audio-panel"><div><span class="badge">AUD01 · MVP</span><h3>Голосовое сообщение</h3></div><div class="activity-actions"><button class="btn secondary" data-play-speech="${esc(activity.id)}">▶ Прослушать</button><button class="btn text" data-stop-speech>Остановить</button></div><details class="support"><summary>Показать транскрипт</summary><p lang="de">${esc(p.transcript || p.speech_text || '')}</p></details></div>` : ''
-  const speaking = activity.type === 'speaking_reflection' ? `<div class="record-panel"><div class="activity-actions"><button class="btn secondary" data-start-record="${esc(activity.id)}">● Записать голос</button><button class="btn text" data-stop-record="${esc(activity.id)}" disabled>Остановить</button></div><p class="small muted" data-record-status="${esc(activity.id)}">Запись остаётся только в браузере этого MVP; серверная загрузка аудио будет отдельным инкрементом.</p><div data-record-result="${esc(activity.id)}"></div></div>` : ''
+  const listening = activity.type === 'listening_text' ? `<div class="audio-panel"><div><h3>Голосовое сообщение</h3></div><div class="activity-actions"><button class="btn secondary" data-play-speech="${esc(activity.id)}">▶ Прослушать</button><button class="btn text" data-stop-speech>Остановить</button></div><details class="support"><summary>Показать транскрипт</summary><p lang="de">${esc(p.transcript || p.speech_text || '')}</p></details></div>` : ''
+  const speaking = activity.type === 'speaking_reflection' ? `<div class="record-panel"><div class="activity-actions"><button class="btn secondary" data-start-record="${esc(activity.id)}">● Записать голос</button><button class="btn text" data-stop-record="${esc(activity.id)}" disabled>Остановить</button></div><p class="small muted" data-record-status="${esc(activity.id)}">Запись остаётся только на этой странице и преподавателю не отправляется.</p><div data-record-result="${esc(activity.id)}"></div></div>` : ''
   const project = activity.id.endsWith(':project') ? projectSubmissionBlock(activity) : ''
   if (activity.id.endsWith(':revision')) return renderRevisionActivity(activity)
 
-  return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${explanation}${prompt}${source}${items}${listening}${speaking}<label class="field"><span>Мой ответ</span><textarea data-activity-input="${esc(activity.id)}" placeholder="${esc(p.placeholder || '')}">${esc(value)}</textarea></label><div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">${esc(activitySaveLabel(activity))}</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}">${attempt ? 'Ответ загружен с сервера.' : ''}</span></div>${project}${support}</article>`
+  return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${explanation}${prompt}${source}${items}${listening}${speaking}<label class="field"><span>Мой ответ</span><textarea data-activity-input="${esc(activity.id)}" placeholder="${esc(p.placeholder || '')}">${esc(value)}</textarea></label><div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">${esc(activitySaveLabel(activity))}</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${project}${support}</article>`
 }
 
 function projectSubmissionBlock(activity) {
   const submission = latestSubmission(activity.id)
-  if (!submission) return `<div class="submit-box"><div><strong>Проверка преподавателем</strong><p class="small muted">Сначала сохрани письменную часть, затем отправь её преподавателю.</p></div><button class="btn secondary" data-submit-project="${esc(activity.id)}">Отправить преподавателю</button></div>`
+  if (!submission) return `<div class="submit-box"><div></div><button class="btn secondary" data-submit-project="${esc(activity.id)}">Отправить преподавателю</button></div>`
   const review = reviewForSubmission(submission.id)
   const returnedAction = submission.status === 'returned'
     ? '<button class="btn secondary" data-nav="#/student/section/A2.1-M01:feedback">Посмотреть обратную связь</button>'
@@ -726,7 +727,7 @@ function rubricRows(review) {
 function renderRevisionActivity(activity) {
   const context = latestPublishedProjectReview()
   if (!context) {
-    return '<article class="activity-card"><div class="activity-head"><div><span class="activity-kicker">feedback</span><h2>Обратная связь</h2></div><span class="activity-status">Не начато</span></div><div class="notice">Доработка появится после опубликованной обратной связи преподавателя.</div></article>'
+    return '<article class="activity-card"><div class="activity-head"><div><h2>Обратная связь</h2></div><span class="activity-status">Не начато</span></div><div class="notice">Доработка появится после опубликованной обратной связи преподавателя.</div></article>'
   }
   const { submission, review } = context
   if (submission.status === 'accepted') {
@@ -738,7 +739,7 @@ function renderRevisionActivity(activity) {
   const latestProject = latestSubmission('A2.1-M01:project')
   const alreadyResubmitted = latestProject && latestProject.parent_submission_id === submission.id && ['submitted','in_review','accepted'].includes(latestProject.status)
   return `<article class="activity-card" data-activity="${esc(activity.id)}">
-    <div class="activity-head"><div><span class="activity-kicker">feedback → revision</span><h2>Доработка после обратной связи</h2></div><span class="activity-status">${attempt ? 'Черновик' : 'Не начато'}</span></div>
+    <div class="activity-head"><div><h2>Доработка после обратной связи</h2></div><span class="activity-status">${attempt ? 'Черновик' : 'Не начато'}</span></div>
     <div class="teacher-feedback">
       <span class="badge">Что проверить</span>
       <ul class="rubric-list">${rubricRows(review)}</ul>
@@ -1034,9 +1035,9 @@ function renderTeacherSubmission(submissionId) {
     <span class="badge">${esc(submissionLabel(submission.status))}</span>
     <h1>Проверка итоговой работы</h1>
     <section class="review-context">
-      <div><span class="rail-label">УЧЕНИК</span><strong>${esc(student?.display_name || student?.email || 'Ученик')}</strong></div>
+      <div><span class="rail-label">УЧЕНИК</span> <strong>${esc(student?.display_name || student?.email || 'Ученик')}</strong></div>
       <div><span class="rail-label">ИСХОДНОЕ ЗАДАНИЕ</span><p>${esc(task)}</p></div>
-      <div><span class="rail-label">ТРЕБОВАНИЯ</span><strong>${requirement}</strong></div>
+      <div><span class="rail-label">ТРЕБОВАНИЯ</span> <strong>${requirement}</strong></div>
       <div><span class="rail-label">ОТВЕТ УЧЕНИКА</span><div class="submission-text" lang="de">${lines(submission.text_body || '')}</div></div>
     </section>
     <section class="card review-card"><h2>Проверка</h2>${review}</section>`
@@ -1151,8 +1152,23 @@ function playSpeech(activityId) {
   const activity = state.data.activities.find(x => x.id === activityId)
   const text = activity?.payload?.speech_text
   if (!text || !('speechSynthesis' in window)) return
+  if (speechSynthesis.speaking && !speechSynthesis.paused) {
+    speechSynthesis.pause()
+    const button = document.querySelector(`[data-play-speech="${cssEscape(activityId)}"]`)
+    if (button) button.textContent = '▶ Продолжить'
+    return
+  }
+  if (speechSynthesis.paused) {
+    speechSynthesis.resume()
+    const button = document.querySelector(`[data-play-speech="${cssEscape(activityId)}"]`)
+    if (button) button.textContent = '⏸ Пауза'
+    return
+  }
   speechSynthesis.cancel()
   const utterance = new SpeechSynthesisUtterance(text)
+  const button = document.querySelector(`[data-play-speech="${cssEscape(activityId)}"]`)
+  if (button) button.textContent = '⏸ Пауза'
+  utterance.onend = () => { if (button?.isConnected) button.textContent = '▶ Прослушать' }
   utterance.lang = 'de-DE'
   const voice = speechSynthesis.getVoices().find(v => v.lang?.toLowerCase().startsWith('de'))
   if (voice) utterance.voice = voice
@@ -1284,6 +1300,8 @@ app.addEventListener('click', event => {
   }
   if (event.target.closest('[data-stop-speech]')) {
     if ('speechSynthesis' in window) speechSynthesis.cancel()
+    const playButton = document.querySelector('[data-play-speech]')
+    if (playButton) playButton.textContent = '▶ Прослушать'
     return
   }
   const start = event.target.closest('[data-start-record]')
@@ -1544,7 +1562,7 @@ renderStudentSection = function (sectionId) {
 const p1StudentActivityBase = renderStudentActivity
 renderStudentActivity = function (activity) {
   let html=p1StudentActivityBase(activity)
-  if(activity.type==='listening_text') html=html.replace('<div class="audio-panel">','<div class="listening-phase"><span class="phase-label">1 · Gist</span><p>Worum geht es in der Nachricht?</p><span class="phase-label">2 · Selective listening</span><p>Notiere Tag, Uhrzeit und Grund.</p></div><div class="audio-panel">')
+
   return html
 }
 
