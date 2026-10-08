@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import './styles.css'
+import { mountReader } from './reader.js'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
@@ -57,7 +58,7 @@ const esc = (value = '') => String(value).replace(/[&<>"']/g, ch => ({ '&': '&am
 const lines = (value = '') => esc(value).replace(/\n/g, '<br>')
 const roleLabel = role => ({ student: 'Ученик', teacher: 'Преподаватель', admin: 'Администратор' }[role] || role)
 const submissionLabel = status => ({ draft: 'Черновик', submitted: 'Отправлено', in_review: 'На проверке', returned: 'Нужна доработка', accepted: 'Принято' }[status] || status)
-const AUTO_CHECK_TYPES = new Set(['single_choice', 'word_order', 'gap_fill'])
+const AUTO_CHECK_TYPES = new Set(['single_choice', 'word_order', 'gap_fill', 'true_false', 'multiple_choice', 'matching', 'classification', 'dropdown', 'sequencing'])
 const formatDate = value => value ? new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : '—'
 
 const SAVE_LABELS = {
@@ -84,7 +85,7 @@ function clearDraft(activityId) {
 function recoverLocalDrafts() {
   if (state.profile?.role !== 'student' || !state.data) return
   state.data.activities.forEach(activity => {
-    if (activity.type === 'single_choice' || activity.type === 'word_order' || activity.type === 'model') return
+    if (activity.type === 'model' || AUTO_CHECK_TYPES.has(activity.type)) return
     let value = null
     try { value = localStorage.getItem(draftStorageKey(activity.id)) } catch {}
     if (value === null) return
@@ -217,17 +218,19 @@ async function loadTeacherData() {
 }
 
 async function loadAdminData() {
-  const [users, enrollments, cohorts, courses, modules, sections, activities, audit] = await Promise.all([
+  const [users, enrollments, cohorts, cohortStudents, cohortTeachers, courses, modules, sections, activities, audit] = await Promise.all([
     selectAll('app_users', 'id,email,display_name,role,status,created_at,updated_at'),
     selectAll('enrollments', 'id,student_id,course_id,cohort_id,status,source,starts_at,ends_at,created_at,updated_at'),
     selectAll('cohorts', 'id,course_id,title,status,created_at'),
+    selectAll('cohort_students', 'cohort_id,student_id,joined_at'),
+    selectAll('cohort_teachers', 'cohort_id,teacher_id,assigned_at'),
     selectAll('courses', 'id,title,level_code,status,created_at,updated_at'),
     selectAll('course_modules', 'id,course_id,ordinal,title,learning_outcome,status', 'ordinal'),
     selectAll('module_sections', 'id,module_id,legacy_key,ordinal,title,duration_label,status', 'ordinal'),
     selectAll('activities', 'id,section_id,legacy_key,ordinal,type,title,skill,payload,grading,teacher_review_required,status', 'ordinal'),
     selectAll('audit_log', 'id,actor_user_id,actor_kind,action,object_type,object_id,reason,created_at', 'created_at', false, 30),
   ])
-  return { users, enrollments, cohorts, courses, modules, sections, activities, audit, attempts: [], submissions: [], reviews: [] }
+  return { users, enrollments, cohorts, cohortStudents, cohortTeachers, courses, modules, sections, activities, audit, attempts: [], submissions: [], reviews: [] }
 }
 
 async function selectAll(table, columns, orderColumn = null, ascending = true, limit = null) {
@@ -342,8 +345,11 @@ function lessonSidebar(current) {
   const parts = routeParts()
   if (state.profile.role !== 'student' || parts[1] !== 'section') return ''
   const sectionId = parts.slice(2).join('/')
-  const sections = moduleSections()
-  return `<div class="navtitle">A2.1 · Модуль 01</div>
+  const currentSection = state.data.sections.find(item => item.id === sectionId)
+  const module = state.data.modules.find(item => item.id === currentSection?.module_id) || activeStudentModule()
+  const course = state.data.courses.find(item => item.id === module?.course_id)
+  const sections = moduleSections(module?.id)
+  return `<div class="navtitle">${esc(course?.level_code || course?.id || '')} · Модуль ${String(module?.ordinal || 1).padStart(2, '0')}</div>
     <div class="lesson-side-nav">${sections.map(section => {
       const activities = sectionActivities(section.id)
       const done = activities.filter(activityComplete).length
@@ -408,6 +414,7 @@ function renderBlocked(status) {
 function renderStudentRoute(parts) {
   const page = parts[1] || 'home'
   if (page === 'home') return renderStudentHome()
+  if (page === 'reader') return renderStudentReader()
   if (page === 'courses') return renderStudentCourses()
   if (page === 'course') return renderStudentCourse(parts[2] || COURSE_ID)
   if (page === 'module') return renderStudentModule(parts[2] || MODULE_ID)
@@ -415,11 +422,22 @@ function renderStudentRoute(parts) {
   navigate('#/student/home')
 }
 
-function activeStudentModule() {
-  return state.data.modules.find(x => x.id === MODULE_ID) || state.data.modules[0]
+function renderStudentReader() {
+  app.innerHTML = shell('student', '<div class="reader-page-host" data-reader-root></div>')
+  mountReader(document.querySelector('[data-reader-root]'), state.profile.id)
 }
 
-function moduleSections(moduleId = MODULE_ID) {
+function activeStudentModule() {
+  const modules = [...(state.data?.modules || [])].sort((a, b) =>
+    String(a.course_id).localeCompare(String(b.course_id)) || Number(a.ordinal) - Number(b.ordinal)
+  )
+  const latestProgress = [...(state.data?.progress || [])]
+    .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))
+    .find(item => modules.some(module => module.id === item.module_id))
+  return modules.find(module => module.id === latestProgress?.module_id) || modules[0] || null
+}
+
+function moduleSections(moduleId = activeStudentModule()?.id || MODULE_ID) {
   return state.data.sections.filter(x => x.module_id === moduleId).sort((a, b) => a.ordinal - b.ordinal)
 }
 
@@ -465,29 +483,29 @@ function activityStateLabel(activity) {
   return activityStarted(activity) ? 'Черновик' : 'Не начато'
 }
 
-function studentProgress(moduleId = MODULE_ID) {
+function studentProgress(moduleId = activeStudentModule()?.id || MODULE_ID) {
   const sections = moduleSections(moduleId)
   const activities = sections.flatMap(x => sectionActivities(x.id))
   const done = activities.filter(activityComplete).length
   return { done, total: activities.length, percent: activities.length ? Math.round(done / activities.length * 100) : 0 }
 }
 
-function firstModuleSection() {
-  return moduleSections()[0] || null
+function firstModuleSection(moduleId = activeStudentModule()?.id || MODULE_ID) {
+  return moduleSections(moduleId)[0] || null
 }
 
-function resumeSection() {
-  const sections = moduleSections()
-  const progress = state.data.progress.find(x => x.module_id === MODULE_ID)
+function resumeSection(moduleId = activeStudentModule()?.id || MODULE_ID) {
+  const sections = moduleSections(moduleId)
+  const progress = state.data.progress.find(x => x.module_id === moduleId)
   const current = progress?.current_section_id ? sections.find(x => x.id === progress.current_section_id) : null
   if (current && sectionActivities(current.id).some(a => !activityComplete(a))) return current
-  return sections.find(section => sectionActivities(section.id).some(a => !activityComplete(a))) || current || firstModuleSection()
+  return sections.find(section => sectionActivities(section.id).some(a => !activityComplete(a))) || current || firstModuleSection(moduleId)
 }
 
 function renderStudentHome() {
   const module = activeStudentModule()
   const progress = studentProgress(module?.id)
-  const resume = resumeSection()
+  const resume = resumeSection(module?.id)
   const course = state.data.courses.find(x => x.id === module?.course_id) || state.data.courses[0]
   const firstName = String(state.profile.display_name || 'ученик').trim().split(/\s+/)[0]
 
@@ -495,16 +513,16 @@ function renderStudentHome() {
     <h1>Привет, ${esc(firstName)}.</h1>
     <section class="hero">
       <div>
-        <div class="eyebrow">A2.1 · МОДУЛЬ 01</div>
+        <div class="eyebrow">${esc(course?.level_code || course?.id || '')} · МОДУЛЬ ${String(module?.ordinal || 1).padStart(2, '0')}</div>
         <h2>${esc(module?.title || 'Договориться о встрече и изменить планы')}</h2>
         <p class="hero-desc">${esc(module?.learning_outcome || '')}</p>
         <div class="actions">
-          <button class="btn" data-nav="#/student/section/${esc(resume?.id || firstModuleSection()?.id || '')}">${progress.done ? 'Продолжить модуль' : 'Начать модуль'} →</button>
+          <button class="btn" data-nav="#/student/section/${esc(resume?.id || firstModuleSection(module?.id)?.id || '')}">${progress.done ? 'Продолжить модуль' : 'Начать модуль'} →</button>
         </div>
       </div>
       <div class="hero-art" aria-hidden="true">
-        <div class="hero-art-top">A2.1</div>
-        <div class="hero-art-number">01</div>
+        <div class="hero-art-top">${esc(course?.level_code || course?.id || '')}</div>
+        <div class="hero-art-number">${String(module?.ordinal || 1).padStart(2, '0')}</div>
         <div class="hero-art-label">модуль</div>
       </div>
     </section>
@@ -538,7 +556,7 @@ function renderStudentHome() {
     <section class="rail-card">
       <span class="rail-label">СЛЕДУЮЩИЙ ШАГ</span>
       <h3>${esc(resume?.title || 'Модуль')}</h3>
-      <p class="muted">${resume ? `${resume.ordinal} из ${moduleSections().length} разделов` : ''}</p>
+      <p class="muted">${resume ? `${resume.ordinal} из ${moduleSections(module?.id).length} разделов` : ''}</p>
       <button class="btn secondary full" data-nav="#/student/module/${esc(module?.id || MODULE_ID)}">Структура модуля</button>
     </section>
     <section class="rail-card unavailable-card">
@@ -585,7 +603,7 @@ function renderStudentModule(moduleId) {
   if (!module) return navigate('#/student/home')
   const sections = moduleSections(module.id)
   const progress = studentProgress(module.id)
-  const resume = resumeSection()
+  const resume = resumeSection(module.id)
   const content = `<div class="breadcrumbs"><button data-nav="#/student/course/${esc(module.course_id)}">${esc(module.course_id)}</button><span>›</span><span>Модуль ${module.ordinal}</span></div>
     <div class="module-hero"><div><span class="badge">${esc(module.course_id)} · Модуль ${String(module.ordinal).padStart(2, '0')}</span><h1>${esc(module.title)}</h1><p class="lead">${esc(module.learning_outcome || '')}</p></div><div class="module-progress"><strong>${progress.percent}%</strong><span>${progress.done} из ${progress.total} заданий завершено</span></div></div>
     <div class="section-heading"><h2>Структура модуля</h2><button class="btn" data-nav="#/student/section/${esc(resume?.id || sections[0]?.id || '')}">Продолжить</button></div>
@@ -599,7 +617,7 @@ function sectionRow(section) {
   const activities = sectionActivities(section.id)
   const done = activities.filter(activityComplete).length
   const started = activities.filter(activityStarted).length
-  const current = resumeSection()?.id === section.id
+  const current = resumeSection(section.module_id)?.id === section.id
   const deferredReview = section.id === 'A2.1-M01:review' && typeof p1ReviewItem === 'function' && p1ReviewItem() && !p1ReviewAvailable()
   const complete = activities.length > 0 && done === activities.length && !deferredReview
   const stateClass = complete ? 'done' : current ? 'current' : started || deferredReview ? 'started' : 'next'
@@ -611,12 +629,12 @@ function sectionRow(section) {
 
 function renderStudentSection(sectionId) {
   const section = state.data.sections.find(x => x.id === sectionId) || firstModuleSection()
-  if (!section) return navigate('#/student/module/' + MODULE_ID)
+  if (!section) return navigate('#/student/module/' + (activeStudentModule()?.id || MODULE_ID))
   const module = state.data.modules.find(x => x.id === section.module_id)
   const sections = moduleSections(section.module_id)
   const activities = sectionActivities(section.id)
   const idx = sections.findIndex(x => x.id === section.id)
-  const copy = SECTION_COPY[section.legacy_key] || [section.title, '']
+  const copy = module?.id === MODULE_ID ? (SECTION_COPY[section.legacy_key] || [section.title, '']) : [section.title, '']
   const content = `<div class="lessonhead">
       <div class="inline"><span class="badge green">${esc(module.course_id)} · Модуль ${String(module.ordinal).padStart(2, '0')}</span></div>
       <h1>${esc(copy[0])}</h1>
@@ -657,7 +675,9 @@ function renderStudentActivity(activity) {
   const header = `<div class="activity-head"><div>${!p.instruction ? `<h2 class="activity-title">${esc(activity.title)}</h2>` : ''}</div><span class="activity-status ${activityComplete(activity) ? 'done' : ''}">${esc(status)}</span></div>`
   const instruction = `${p.instruction ? `<p class="task-instruction" lang="de">${esc(p.instruction)}</p>` : ''}<div class="review-mode">${esc(activityReviewLabel(activity))}</div>${p.system_note && activity.type !== 'speaking_reflection' && !activity.id.endsWith(':project') ? `<p class="system-note">${esc(p.system_note)}</p>` : ''}`
   const prompt = p.prompt ? `<div class="prompt-box">${lines(p.prompt)}</div>` : ''
-  const source = Array.isArray(p.source) ? `<div class="chat">${p.source.map(item => `<div class="bubble"><strong>${esc(item.speaker)}</strong><br><span lang="de">${esc(item.text)}</span></div>`).join('')}</div>` : ''
+  const source = Array.isArray(p.source)
+    ? `<div class="chat">${p.source.map(item => `<div class="bubble"><strong>${esc(item.speaker)}</strong><br><span lang="de">${esc(item.text)}</span></div>`).join('')}</div>`
+    : typeof p.source === 'string' && p.source ? `<div class="prompt-box" lang="de">${esc(p.source)}</div>` : ''
   const items = Array.isArray(p.items) ? `<div class="lex-list">${p.items.map(item => `<span>${esc(item)}</span>`).join('')}</div>` : ''
   const supportLabel = activity.grading?.mode === 'model_answer' ? 'Сверить с образцом' : activity.grading?.mode === 'self_review' ? 'Самопроверка' : 'Опора / проверить себя'
   const support = p.support ? `<details class="support"><summary>${esc(supportLabel)}</summary><div>${lines(p.support)}</div></details>` : ''
@@ -687,83 +707,169 @@ function renderStudentActivity(activity) {
   }
 
   if (activity.type === 'gap_fill') {
-    const value = state.pendingDrafts.has(activity.id) ? state.pendingDrafts.get(activity.id) : (attempt?.answer?.text || '')
-    const feedback = attempt?.result?.correct === true ? `<div class="notice success">${esc(p.feedback_correct || 'Верно.')}</div>` : attempt?.result?.correct === false && String(attempt?.answer?.text || '').trim() ? `<div class="notice error">${esc(p.feedback_incorrect || 'Проверь форму и позицию глагола.')}</div>` : ''
-    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${prompt}<label class="field"><span>${esc(p.input_label || 'Вставь слово')}</span><input data-activity-input="${esc(activity.id)}" value="${esc(value)}" autocomplete="off"></label>${feedback}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
+    const expected = Array.isArray(activity.grading?.answers) ? activity.grading.answers : []
+    const multiple = expected.length > 1
+    const savedValues = Array.isArray(attempt?.answer?.values) ? attempt.answer.values : []
+    if (activity.type === 'true_false') {
+    const values = Array.isArray(attempt?.answer?.values) ? attempt.answer.values : []
+    const statements = Array.isArray(p.statements) ? p.statements : []
+    const rows = statements.map((item, index) => `<fieldset class="structured-row"><legend>${index + 1}. ${esc(item.text)}</legend><label class="choice-option inline-choice"><input type="radio" name="tf-${esc(activity.id)}-${index}" value="true" ${values[index] === true ? 'checked' : ''}> Richtig</label><label class="choice-option inline-choice"><input type="radio" name="tf-${esc(activity.id)}-${index}" value="false" ${values[index] === false ? 'checked' : ''}> Falsch</label></fieldset>`).join('')
+    const feedback = attempt?.result?.correct === true ? '<div class="notice success">Richtig.</div>' : attempt?.result?.correct === false ? '<div class="notice error">Noch nicht. Versuch es noch einmal.</div>' : ''
+    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${source}<div class="structured-list">${rows}</div>${feedback}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
+  }
+
+  if (activity.type === 'multiple_choice') {
+    const choices = Array.isArray(attempt?.answer?.choices) ? attempt.answer.choices : []
+    const options = (p.options || []).map((option, index) => `<label class="choice-option ${choices.includes(index) ? 'selected' : ''}"><input type="checkbox" data-multi-choice="${esc(activity.id)}" value="${index}" ${choices.includes(index) ? 'checked' : ''}><span>${esc(option)}</span></label>`).join('')
+    const speech = p.speech_text ? `<div class="audio-panel"><div><h3>Аудирование</h3></div><div class="activity-actions"><button class="btn secondary" data-play-inline-speech="${esc(activity.id)}" data-speech-text="${esc(p.speech_text)}">▶ Прослушать</button></div></div>` : ''
+    const feedback = attempt?.result?.correct === true ? '<div class="notice success">Richtig.</div>' : attempt?.result?.correct === false ? '<div class="notice error">Noch nicht. Versuch es noch einmal.</div>' : ''
+    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${speech}${prompt}<div class="choice-list">${options}</div>${feedback}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
+  }
+
+  if (activity.type === 'classification') {
+    const values = Array.isArray(attempt?.answer?.values) ? attempt.answer.values : []
+    const categories = Array.isArray(p.categories) ? p.categories : []
+    const rows = (p.items || []).map((item, index) => `<label class="structured-row"><span>${esc(item.text)}</span><select data-structured-select="${esc(activity.id)}" data-structured-index="${index}"><option value="">—</option>${categories.map(category => `<option value="${esc(category)}" ${values[index] === category ? 'selected' : ''}>${esc(category)}</option>`).join('')}</select></label>`).join('')
+    const feedback = attempt?.result?.correct === true ? '<div class="notice success">Richtig.</div>' : attempt?.result?.correct === false ? '<div class="notice error">Noch nicht. Versuch es noch einmal.</div>' : ''
+    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}<div class="structured-list">${rows}</div>${feedback}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
+  }
+
+  if (activity.type === 'matching') {
+    const values = Array.isArray(attempt?.answer?.values) ? attempt.answer.values : []
+    const pairs = Array.isArray(p.pairs) ? p.pairs : []
+    const choices = pairs.map(pair => pair[1])
+    const rows = pairs.map((pair, index) => `<label class="structured-row"><span lang="de">${esc(pair[0])}</span><select data-structured-select="${esc(activity.id)}" data-structured-index="${index}"><option value="">—</option>${choices.map(choice => `<option value="${esc(choice)}" ${values[index] === choice ? 'selected' : ''}>${esc(choice)}</option>`).join('')}</select></label>`).join('')
+    const feedback = attempt?.result?.correct === true ? '<div class="notice success">Richtig.</div>' : attempt?.result?.correct === false ? '<div class="notice error">Noch nicht. Versuch es noch einmal.</div>' : ''
+    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}<div class="structured-list">${rows}</div>${feedback}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
+  }
+
+  if (activity.type === 'dropdown') {
+    const values = Array.isArray(attempt?.answer?.values) ? attempt.answer.values : []
+    const choices = [...new Set((p.items || []).map(item => item.answer).filter(Boolean))]
+    const rows = (p.items || []).map((item, index) => `<label class="structured-row"><span lang="de">${esc(item.text)}</span><select data-structured-select="${esc(activity.id)}" data-structured-index="${index}"><option value="">—</option>${choices.map(choice => `<option value="${esc(choice)}" ${values[index] === choice ? 'selected' : ''}>${esc(choice)}</option>`).join('')}</select></label>`).join('')
+    const feedback = attempt?.result?.correct === true ? '<div class="notice success">Richtig.</div>' : attempt?.result?.correct === false ? '<div class="notice error">Noch nicht. Versuch es noch einmal.</div>' : ''
+    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}<div class="structured-list">${rows}</div>${feedback}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
+  }
+
+  if (activity.type === 'sequencing') {
+    const savedOrder = Array.isArray(attempt?.answer?.order) ? attempt.answer.order : []
+    const tokens = Array.isArray(p.items) ? p.items : []
+    const selected = savedOrder.map(index => tokens[index]).filter(Boolean)
+    const buttons = tokens.map((token, index) => `<button class="order-token" type="button" data-order-token="${index}" data-activity-id="${esc(activity.id)}">${esc(token)}</button>`).join('')
+    const built = selected.map((token, position) => `<button class="order-built-token" type="button" data-order-remove="${position}" data-activity-id="${esc(activity.id)}">${esc(token)}</button>`).join('')
+    const feedback = attempt?.result?.correct === true ? '<div class="notice success">Richtig.</div>' : attempt?.result?.correct === false && savedOrder.length ? '<div class="notice error">Noch nicht. Prüfe die Reihenfolge.</div>' : ''
+    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}<div class="word-order-bank">${buttons}</div><div class="word-order-answer" data-order-answer="${esc(activity.id)}">${built || '<span class="muted">Нажимай реплики по порядку.</span>'}</div><input type="hidden" data-order-input="${esc(activity.id)}" value="${esc(JSON.stringify(savedOrder))}">${feedback}<div class="activity-actions"><button class="btn secondary" type="button" data-order-reset="${esc(activity.id)}">Сбросить</button><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
   }
 
   const value = state.pendingDrafts.has(activity.id) ? state.pendingDrafts.get(activity.id) : (attempt?.answer?.text || '')
+    const fields = multiple
+      ? expected.map((_, index) => `<label class="field compact-field"><span>Lücke ${index + 1}</span><input data-gap-input="${esc(activity.id)}" data-gap-index="${index}" value="${esc(savedValues[index] || '')}" autocomplete="off"></label>`).join('')
+      : `<label class="field"><span>${esc(p.input_label || 'Вставь слово')}</span><input data-activity-input="${esc(activity.id)}" value="${esc(value)}" autocomplete="off"></label>`
+    const hasAnswer = multiple ? savedValues.some(Boolean) : String(attempt?.answer?.text || '').trim()
+    const feedback = attempt?.result?.correct === true ? `<div class="notice success">${esc(p.feedback_correct || 'Верно.')}</div>` : attempt?.result?.correct === false && hasAnswer ? `<div class="notice error">${esc(p.feedback_incorrect || 'Проверь ответы.')}</div>` : ''
+    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${prompt}<div class="structured-fields">${fields}</div>${feedback}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
+  }
+
+  const value = state.pendingDrafts.has(activity.id) ? state.pendingDrafts.get(activity.id) : (attempt?.answer?.text || '')
+  const reconstruction = activity.type === 'reconstruction' && Array.isArray(p.blocks) ? `<div class="reconstruction-blocks">${p.blocks.map(block => `<div class="prompt-box" lang="de">${esc(block)}</div>`).join('')}</div>` : ''
   const listening = activity.type === 'listening_text' ? `<div class="audio-panel"><div><h3>Голосовое сообщение</h3></div><div class="activity-actions"><button class="btn secondary" data-play-speech="${esc(activity.id)}">▶ Прослушать</button></div><details class="support"><summary>Показать транскрипт</summary><p lang="de">${esc(p.transcript || p.speech_text || '')}</p></details></div>` : ''
   const speaking = activity.type === 'speaking_reflection' ? `<div class="record-panel"><div class="activity-actions"><button class="btn secondary" data-record-toggle="${esc(activity.id)}" aria-pressed="false"><span aria-hidden="true">🎙</span> Записать</button><span class="small muted" role="status" aria-live="polite" data-record-live="${esc(activity.id)}"></span></div><p class="small muted">Запись остаётся только на этой странице и преподавателю не отправляется.</p><div data-record-result="${esc(activity.id)}"></div></div>` : ''
   const project = activity.id.endsWith(':project') ? projectSubmissionBlock(activity) : ''
   if (activity.id.endsWith(':revision')) return renderRevisionActivity(activity)
 
-  return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${explanation}${prompt}${source}${items}${listening}${speaking}<label class="field"><span>Мой ответ</span><textarea data-activity-input="${esc(activity.id)}" placeholder="${esc(p.placeholder || '')}">${esc(value)}</textarea></label><div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">${esc(activitySaveLabel(activity))}</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${project}${support}</article>`
+  return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${explanation}${prompt}${source}${items}${reconstruction}${listening}${speaking}<label class="field"><span>Мой ответ</span><textarea data-activity-input="${esc(activity.id)}" placeholder="${esc(p.placeholder || '')}">${esc(value)}</textarea></label><div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">${esc(activitySaveLabel(activity))}</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${project}${support}</article>`
+}
+
+function moduleForActivity(activity) {
+  const section = state.data.sections.find(item => item.id === activity?.section_id)
+  return state.data.modules.find(item => item.id === section?.module_id) || null
+}
+
+function projectActivityForModule(moduleId) {
+  return state.data.activities.find(item => item.id === `${moduleId}:project`)
+    || state.data.activities.find(item => {
+      const section = state.data.sections.find(sectionItem => sectionItem.id === item.section_id)
+      return section?.module_id === moduleId && item.teacher_review_required
+    })
+    || null
 }
 
 function projectSubmissionBlock(activity) {
   const submission = latestSubmission(activity.id)
   if (!submission) return `<div class="submit-box"><div></div><button class="btn secondary" data-submit-project="${esc(activity.id)}">Отправить преподавателю</button></div>`
   const review = reviewForSubmission(submission.id)
-  const returnedAction = submission.status === 'returned'
-    ? '<button class="btn secondary" data-nav="#/student/section/A2.1-M01:feedback">Посмотреть обратную связь</button>'
+  const module = moduleForActivity(activity)
+  const feedbackSection = state.data.sections.find(section => section.module_id === module?.id && section.legacy_key === 'feedback')
+  const returnedAction = submission.status === 'returned' && feedbackSection
+    ? `<button class="btn secondary" data-nav="#/student/section/${esc(feedbackSection.id)}">Посмотреть обратную связь</button>`
     : ''
   return `<div class="submit-box"><div><strong>${esc(submissionLabel(submission.status))}</strong><p class="small muted">${submission.submitted_at ? `Отправлено ${formatDate(submission.submitted_at)}` : ''}${review ? ' · обратная связь опубликована' : ''}</p></div>${returnedAction}</div>`
 }
 
-function latestPublishedProjectReview() {
+function latestPublishedProjectReview(moduleId) {
+  const project = projectActivityForModule(moduleId)
+  if (!project) return null
   const projectSubmissions = [...state.data.submissions]
-    .filter(item => item.activity_id === 'A2.1-M01:project')
+    .filter(item => item.activity_id === project.id)
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
   for (const submission of projectSubmissions) {
     const review = reviewForSubmission(submission.id)
-    if (review) return { submission, review }
+    if (review) return { submission, review, project }
   }
   return null
 }
 
-function rubricRows(review) {
+function rubricRows(review, moduleId = MODULE_ID) {
   const rubric = review?.rubric || {}
-  const items = [
-    ['task', 'Задача выполнена'],
-    ['agreement', 'Договорённость понятна'],
-    ['weil', 'weil'],
-    ['vocabulary', 'Подходящая лексика']
-  ]
+  const a21 = moduleId === MODULE_ID
+  const items = a21
+    ? [
+        ['task', 'Задача выполнена'],
+        ['agreement', 'Договорённость понятна'],
+        ['weil', 'weil'],
+        ['vocabulary', 'Подходящая лексика']
+      ]
+    : [
+        ['task', 'Задача выполнена'],
+        ['agreement', 'Структура и понятность'],
+        ['weil', 'Языковая точность'],
+        ['vocabulary', 'Подходящая лексика']
+      ]
   return items.map(([key, label]) => `<li class="${rubric[key] ? 'ok' : 'needs-work'}"><span aria-hidden="true">${rubric[key] ? '✓' : '○'}</span><span>${esc(label)}</span></li>`).join('')
 }
 
 function renderRevisionActivity(activity) {
-  const context = latestPublishedProjectReview()
+  const module = moduleForActivity(activity)
+  const moduleId = module?.id
+  const context = moduleId ? latestPublishedProjectReview(moduleId) : null
   if (!context) {
     return '<article class="activity-card"><div class="activity-head"><div><h2>Обратная связь</h2></div><span class="activity-status">Не начато</span></div><div class="notice">Доработка появится после опубликованной обратной связи преподавателя.</div></article>'
   }
-  const { submission, review } = context
+  const { submission, review, project } = context
   if (submission.status === 'accepted') {
-    return `<article class="activity-card"><div class="activity-head"><div><span class="activity-kicker">feedback</span><h2>Обратная связь</h2></div><span class="activity-status done">Готово</span></div><div class="teacher-feedback"><span class="badge green">Работа принята</span><ul class="rubric-list">${rubricRows(review)}</ul>${review.comment ? `<p><strong>Комментарий:</strong> ${esc(review.comment)}</p>` : ''}</div></article>`
+    return `<article class="activity-card"><div class="activity-head"><div><h2>Обратная связь</h2></div><span class="activity-status done">Готово</span></div><div class="teacher-feedback"><span class="badge green">Работа принята</span><ul class="rubric-list">${rubricRows(review, moduleId)}</ul>${review.comment ? `<p><strong>Комментарий:</strong> ${esc(review.comment)}</p>` : ''}</div></article>`
   }
 
   const attempt = attemptFor(activity.id)
   const value = state.pendingDrafts.has(activity.id) ? state.pendingDrafts.get(activity.id) : (attempt?.answer?.text || '')
-  const latestProject = latestSubmission('A2.1-M01:project')
+  const latestProject = latestSubmission(project.id)
   const alreadyResubmitted = latestProject && latestProject.parent_submission_id === submission.id && ['submitted','in_review','accepted'].includes(latestProject.status)
+  const checklist = moduleId === MODULE_ID
+    ? '<label><input type="checkbox"> Я понял(а), что нужно изменить.</label><label><input type="checkbox"> Я проверил(а) порядок слов после weil.</label><label><input type="checkbox"> Я проверил(а) время, место и понятность договорённости.</label>'
+    : '<label><input type="checkbox"> Я понял(а), что нужно изменить.</label><label><input type="checkbox"> Я проверил(а) структуру и понятность.</label><label><input type="checkbox"> Я проверил(а) язык и лексику.</label>'
   return `<article class="activity-card" data-activity="${esc(activity.id)}">
     <div class="activity-head"><div><h2>Доработка после обратной связи</h2></div><span class="activity-status">${attempt ? 'Черновик' : 'Не начато'}</span></div>
     <div class="teacher-feedback">
       <span class="badge">Что проверить</span>
-      <ul class="rubric-list">${rubricRows(review)}</ul>
+      <ul class="rubric-list">${rubricRows(review, moduleId)}</ul>
       ${review.comment ? `<div class="notice"><strong>Преподаватель просит улучшить:</strong><br>${lines(review.comment)}</div>` : ''}
     </div>
-    <fieldset class="revision-checklist">
-      <legend>Перед доработкой</legend>
-      <label><input type="checkbox"> Я понял(а), что нужно изменить.</label>
-      <label><input type="checkbox"> Я проверил(а) порядок слов после weil.</label>
-      <label><input type="checkbox"> Я проверил(а) время, место и понятность договорённости.</label>
-    </fieldset>
-    <label class="field"><span>Доработанная версия</span><textarea data-activity-input="${esc(activity.id)}" placeholder="Перепиши сообщение с учётом обратной связи.">${esc(value)}</textarea></label>
+    <fieldset class="revision-checklist"><legend>Перед доработкой</legend>${checklist}</fieldset>
+    <label class="field"><span>Доработанная версия</span><textarea data-activity-input="${esc(activity.id)}" placeholder="Перепиши ответ с учётом обратной связи.">${esc(value)}</textarea></label>
     <div class="activity-actions"><button class="btn secondary" data-save-activity="${esc(activity.id)}">Сохранить черновик</button>${alreadyResubmitted ? `<span class="status-pill">${esc(submissionLabel(latestProject.status))}</span>` : `<button class="btn" data-submit-revision="${esc(activity.id)}" data-parent-submission="${esc(submission.id)}">Отправить доработанную версию</button>`}<span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}">${attempt ? 'Черновик загружен с сервера.' : ''}</span></div>
   </article>`
 }
+
 
 async function saveActivity(activityId, explicit = true) {
   const previous = state.savePromises.get(activityId) || Promise.resolve(true)
@@ -796,12 +902,42 @@ async function persistActivity(activityId, explicit = true) {
     const choice = Number(checked.value)
     answer = { choice }
     result = { correct: choice === Number(activity.grading?.correct_index) }
-  } else if (activity.type === 'word_order') {
+  } else if (activity.type === 'word_order' || activity.type === 'sequencing') {
     const input = document.querySelector(`[data-order-input="${cssEscape(activityId)}"]`)
     let order = []
     try { order = JSON.parse(input?.value || '[]') } catch {}
     answer = { order }
     result = { correct: JSON.stringify(order) === JSON.stringify(activity.grading?.expected_order || []) }
+  } else if (activity.type === 'true_false') {
+    const statements = Array.isArray(activity.payload?.statements) ? activity.payload.statements : []
+    const values = statements.map((_, index) => {
+      const checked = document.querySelector(`input[name="tf-${cssEscape(activityId)}-${index}"]:checked`)
+      return checked ? checked.value === 'true' : null
+    })
+    if (values.some(value => value === null)) {
+      setSaveStatus(activityId, 'Ответь на все пункты.')
+      return false
+    }
+    answer = { values }
+    result = { correct: values.every((value,index) => value === Boolean(statements[index]?.answer)) }
+  } else if (activity.type === 'multiple_choice') {
+    const choices = [...document.querySelectorAll(`[data-multi-choice="${cssEscape(activityId)}"]:checked`)].map(input => Number(input.value)).sort((a,b)=>a-b)
+    const expected = [...(activity.grading?.correct_indices || activity.payload?.correct_indices || [])].map(Number).sort((a,b)=>a-b)
+    answer = { choices }
+    result = { correct: JSON.stringify(choices) === JSON.stringify(expected) }
+  } else if (['classification','matching','dropdown'].includes(activity.type)) {
+    const selects = [...document.querySelectorAll(`[data-structured-select="${cssEscape(activityId)}"]`)]
+      .sort((a,b)=>Number(a.dataset.structuredIndex)-Number(b.dataset.structuredIndex))
+    const values = selects.map(select => select.value)
+    if (values.some(value => !value)) {
+      setSaveStatus(activityId, 'Заполни все пункты.')
+      return false
+    }
+    let expected = []
+    if (activity.type === 'classification' || activity.type === 'dropdown') expected = (activity.payload?.items || []).map(item => String(item.answer || ''))
+    if (activity.type === 'matching') expected = (activity.payload?.pairs || []).map(pair => String(pair?.[1] || ''))
+    answer = { values }
+    result = { correct: JSON.stringify(values) === JSON.stringify(expected) }
   } else {
     const input = document.querySelector(`[data-activity-input="${cssEscape(activityId)}"]`)
     const text = state.pendingDrafts.has(activityId)
@@ -809,13 +945,25 @@ async function persistActivity(activityId, explicit = true) {
       : (input?.value ?? attemptFor(activityId)?.answer?.text ?? '')
     answer = { text }
     if (activity.type === 'gap_fill') {
-      const normalized = String(text).trim().toLocaleLowerCase('de-DE')
       const answers = Array.isArray(activity.grading?.answers) ? activity.grading.answers : []
-      result = { correct: answers.some(value => String(value).trim().toLocaleLowerCase('de-DE') === normalized) }
+      if (answers.length > 1) {
+        const fields = [...document.querySelectorAll(`[data-gap-input="${cssEscape(activityId)}"]`)]
+          .sort((a,b)=>Number(a.dataset.gapIndex)-Number(b.dataset.gapIndex))
+        const values = fields.map(input => String(input.value || '').trim())
+        if (values.some(value => !value)) {
+          setSaveStatus(activityId, 'Заполни все пропуски.')
+          return false
+        }
+        answer = { values }
+        result = { correct: values.every((value,index) => value.toLocaleLowerCase('de-DE') === String(answers[index] || '').trim().toLocaleLowerCase('de-DE')) }
+      } else {
+        const normalized = String(text).trim().toLocaleLowerCase('de-DE')
+        result = { correct: answers.some(value => String(value).trim().toLocaleLowerCase('de-DE') === normalized) }
+      }
     }
   }
 
-  const savedDraftSnapshot = ['single_choice', 'word_order', 'model'].includes(activity.type) ? null : String(answer.text || '')
+  const savedDraftSnapshot = activity.type === 'model' || AUTO_CHECK_TYPES.has(activity.type) ? null : String(answer.text || '')
   const { data, error } = await supabase
     .from('activity_attempts')
     .upsert({
@@ -839,7 +987,7 @@ async function persistActivity(activityId, explicit = true) {
   state.data.attempts.push(data)
   await saveStudentProgress(currentStudentSectionId())
 
-  if (!['single_choice', 'word_order', 'model'].includes(activity.type)) {
+  if (!(activity.type === 'model' || AUTO_CHECK_TYPES.has(activity.type))) {
     const pending = state.pendingDrafts.get(activityId)
     if (pending === undefined || pending === savedDraftSnapshot) clearDraft(activityId)
   }
@@ -888,6 +1036,12 @@ async function submitProject(activityId) {
 
 async function submitRevision(activityId, parentSubmissionId) {
   if (state.profile.role !== 'student') return
+  const revisionActivity = state.data.activities.find(item => item.id === activityId)
+  const module = moduleForActivity(revisionActivity)
+  const project = projectActivityForModule(module?.id)
+  const feedbackSection = state.data.sections.find(section => section.module_id === module?.id && section.legacy_key === 'feedback')
+  if (!module || !project) return
+
   const input = document.querySelector(`[data-activity-input="${cssEscape(activityId)}"]`)
   const text = String(input?.value || state.pendingDrafts.get(activityId) || attemptFor(activityId)?.answer?.text || '').trim()
   if (!text) {
@@ -902,7 +1056,7 @@ async function submitRevision(activityId, parentSubmissionId) {
   const saved = await saveActivity(activityId, true)
   if (!saved) return
 
-  const latest = latestSubmission('A2.1-M01:project')
+  const latest = latestSubmission(project.id)
   if (latest && latest.parent_submission_id === parent.id && ['submitted','in_review','accepted'].includes(latest.status)) {
     setSaveStatus(activityId, 'Доработанная версия уже отправлена.')
     return
@@ -912,7 +1066,7 @@ async function submitRevision(activityId, parentSubmissionId) {
   setSaveStatus(activityId, 'Отправляем доработанную версию…')
   const { data, error } = await supabase.from('submissions').insert({
     student_id: state.profile.id,
-    activity_id: 'A2.1-M01:project',
+    activity_id: project.id,
     parent_submission_id: parent.id,
     status: 'submitted',
     text_body: text,
@@ -923,25 +1077,28 @@ async function submitRevision(activityId, parentSubmissionId) {
     return
   }
   state.data.submissions.push(data)
-  await saveStudentProgress('A2.1-M01:feedback')
+  if (feedbackSection) await saveStudentProgress(feedbackSection.id)
   renderRoute()
 }
 
 async function saveStudentProgress(sectionId) {
   if (state.profile.role !== 'student' || !sectionId) return
-  const sections = moduleSections(MODULE_ID)
+  const currentSection = state.data.sections.find(item => item.id === sectionId)
+  const moduleId = currentSection?.module_id || activeStudentModule()?.id
+  if (!moduleId) return
+  const sections = moduleSections(moduleId)
   const sectionStates = Object.fromEntries(sections.map(section => {
     const acts = sectionActivities(section.id)
     const done = acts.filter(activityComplete).length
     const started = acts.filter(activityStarted).length
-    const deferredReview = section.id === 'A2.1-M01:review' && typeof p1ReviewItem === 'function' && p1ReviewItem() && !p1ReviewAvailable()
+    const deferredReview = moduleId === MODULE_ID && section.id === 'A2.1-M01:review' && typeof p1ReviewItem === 'function' && p1ReviewItem() && !p1ReviewAvailable()
     const status = deferredReview ? 'waiting' : acts.length && done === acts.length ? 'completed' : started ? 'in_progress' : 'not_started'
     return [section.id, { status, done, total: acts.length + (deferredReview ? 1 : 0), ...(deferredReview ? { available_at: p1ReviewItem().due_at } : {}) }]
   }))
-  const p = studentProgress(MODULE_ID)
+  const p = studentProgress(moduleId)
   const row = {
     student_id: state.profile.id,
-    module_id: MODULE_ID,
+    module_id: moduleId,
     current_section_id: sectionId,
     section_states: sectionStates,
     completion_percent: p.percent,
@@ -949,7 +1106,7 @@ async function saveStudentProgress(sectionId) {
   }
   const { data, error } = await supabase.from('learner_module_progress').upsert(row, { onConflict: 'student_id,module_id' }).select('student_id,module_id,current_section_id,section_states,completion_percent,updated_at').single()
   if (error) throw error
-  state.data.progress = state.data.progress.filter(x => x.module_id !== MODULE_ID)
+  state.data.progress = state.data.progress.filter(x => x.module_id !== moduleId)
   state.data.progress.push(data)
 }
 
@@ -970,6 +1127,7 @@ function cssEscape(value) {
 function renderTeacherRoute(parts) {
   const page = parts[1] || 'home'
   if (page === 'home') return renderTeacherHome()
+  if (page === 'courses') return renderTeacherCourses()
   if (page === 'students') return renderTeacherStudents()
   if (page === 'cohort') return renderTeacherCohort(parts[2])
   if (page === 'submission') return renderTeacherSubmission(parts[2])
@@ -985,8 +1143,18 @@ function renderTeacherHome() {
     <div class="course-grid">${state.data.cohorts.length ? state.data.cohorts.map(c => teacherCohortCard(c)).join('') : emptyState('Группы не назначены', 'После назначения преподавателя группе она появится здесь.')}</div>
     <div class="section-heading spaced"><h2>Ждут проверки</h2></div>
     ${pending.length ? `<div class="review-queue">${pending.map(teacherSubmissionRow).join('')}</div>` : emptyState('Очередь пуста', 'Новые открытые работы появятся после отправки учениками.')}`
-  const aside = '<section class="rail-card"><span class="rail-label">A2.1 · M01</span><h3>Договориться о встрече и изменить планы</h3><button class="btn secondary full" data-nav="#/teacher/module/A2.1-M01">План модуля и занятий</button></section>'
+  const aside = '<section class="rail-card"><span class="rail-label">МАТЕРИАЛЫ</span><h3>Все курсы</h3><p class="muted">Преподаватель видит опубликованные материалы всех курсов.</p><button class="btn secondary full" data-nav="#/teacher/courses">Открыть каталог</button></section>'
   app.innerHTML = shell('teacher', content, aside)
+}
+
+function renderTeacherCourses() {
+  const courses = [...state.data.courses].sort((a,b)=>String(a.level_code||a.id).localeCompare(String(b.level_code||b.id), 'de', { numeric: true }))
+  const content = `<div class="eyebrow">ВСЕ МАТЕРИАЛЫ</div><h1>Курсы</h1><p class="lead muted">Содержательный каталог опубликованных курсов. Группы и ученики при этом остаются только назначенными преподавателю.</p>
+    <div class="course-grid">${courses.map(course => {
+      const modules = state.data.modules.filter(module => module.course_id === course.id).sort((a,b)=>a.ordinal-b.ordinal)
+      return `<article class="course-card static-card"><span class="badge">${esc(course.level_code || course.id)}</span><h3>${esc(course.title)}</h3><p class="muted">${ruCount(modules.length,['модуль','модуля','модулей'])}</p><div class="compact-link-list">${modules.map(module => `<button class="inline-link" data-nav="#/teacher/module/${esc(module.id)}">Модуль ${String(module.ordinal).padStart(2,'0')} · ${esc(module.title)}</button>`).join('')}</div></article>`
+    }).join('')}</div>`
+  app.innerHTML = shell('teacher', content)
 }
 
 function renderTeacherStudents() {
@@ -1024,17 +1192,16 @@ function renderTeacherSubmission(submissionId) {
   if (!submission) return navigate('#/teacher/home')
   const student = state.data.students.find(x => x.id === submission.student_id)
   const activity = state.data.activities.find(x => x.id === submission.activity_id)
+  const module = moduleForActivity(activity)
   const existing = state.data.reviews.find(x => x.submission_id === submission.id && x.status === 'published')
-  const requirement = activity?.payload?.word_target ? `${esc(activity.payload.word_target)} Wörter` : '40–60 Wörter'
-  const task = activity?.payload?.instruction || 'Подтверди договорённость: причина изменения, новое время, место и просьба ответить.'
-  const rubricFields = [
-    ['task', 'Задача выполнена'],
-    ['agreement', 'Договорённость понятна'],
-    ['weil', 'weil'],
-    ['vocabulary', 'Подходящая лексика']
-  ]
+  const requirement = activity?.payload?.word_target ? `${esc(activity.payload.word_target)} Wörter` : 'Краткий связный ответ'
+  const task = activity?.payload?.instruction || activity?.title || 'Итоговая работа модуля'
+  const a21 = module?.id === MODULE_ID
+  const rubricFields = a21
+    ? [['task','Задача выполнена'],['agreement','Договорённость понятна'],['weil','weil'],['vocabulary','Подходящая лексика']]
+    : [['task','Задача выполнена'],['agreement','Структура и понятность'],['weil','Языковая точность'],['vocabulary','Подходящая лексика']]
   const rubric = existing
-    ? `<ul class="rubric-list">${rubricRows(existing)}</ul>`
+    ? `<ul class="rubric-list">${rubricRows(existing, module?.id)}</ul>`
     : `<div class="teacher-rubric">${rubricFields.map(([key,label]) => `<label><input type="checkbox" name="rubric_${key}"> ${esc(label)}</label>`).join('')}</div>`
   const review = existing
     ? `<div class="teacher-feedback"><span class="badge">Опубликовано</span>${rubric}${existing.comment ? `<p><strong>Комментарий ученику:</strong> ${esc(existing.comment)}</p>` : ''}</div>`
@@ -1151,7 +1318,14 @@ function activityTypeLabel(type) {
     gap_fill: 'Заполнить пропуски',
     model: 'Образец / самопроверка',
     listening_text: 'Аудирование',
-    speaking_reflection: 'Устная практика'
+    speaking_reflection: 'Устная практика',
+    true_false: 'Верно / неверно',
+    multiple_choice: 'Несколько вариантов',
+    matching: 'Соответствия',
+    classification: 'Классификация',
+    dropdown: 'Выбор из списка',
+    sequencing: 'Последовательность',
+    reconstruction: 'Реконструкция'
   }[type] || type)
 }
 
@@ -1245,29 +1419,80 @@ function renderAdminHome() {
 }
 
 function renderAdminUsers() {
+  const students = state.data.users.filter(user => user.role === 'student')
+  const teachers = state.data.users.filter(user => user.role === 'teacher')
+  const courses = [...state.data.courses].sort((a,b)=>String(a.level_code||a.id).localeCompare(String(b.level_code||b.id), 'de', { numeric: true }))
+  const cohorts = [...state.data.cohorts].sort((a,b)=>String(a.course_id).localeCompare(String(b.course_id)) || String(a.title).localeCompare(String(b.title)))
+
   const rows = state.data.users.map(user => `<form class="admin-user-row" data-admin-user-form="${esc(user.id)}">
       <div class="admin-user-main"><strong>${esc(user.display_name || user.email || 'Пользователь')}</strong><span class="muted">${esc(user.email || '')}</span><span class="small muted">Создан: ${formatDate(user.created_at)}</span></div>
       <label class="compact-field"><span>Роль</span><select name="role">
         ${['student','teacher','admin'].map(role => `<option value="${role}" ${role === user.role ? 'selected' : ''}>${esc(roleLabel(role))}</option>`).join('')}
       </select></label>
-      <label class="compact-field"><span>Статус</span><select name="status">
-        <option value="active" ${user.status === 'active' ? 'selected' : ''}>Активен</option>
-        <option value="blocked" ${user.status === 'blocked' ? 'selected' : ''}>Заблокирован</option>
+      <label class="compact-field"><span>Статус</span><select name="status" ${user.status === 'invited' ? 'disabled' : ''}>
+        ${user.status === 'invited' ? '<option selected>Ожидает приглашения</option>' : `<option value="active" ${user.status === 'active' ? 'selected' : ''}>Активен</option><option value="blocked" ${user.status === 'blocked' ? 'selected' : ''}>Заблокирован</option>`}
       </select></label>
-      <button class="btn secondary compact" type="submit">Сохранить</button>
+      ${user.status === 'invited' && user.email ? `<button class="btn secondary compact" type="button" data-admin-invite-existing="${esc(user.id)}">Пригласить</button>` : '<button class="btn secondary compact" type="submit">Сохранить</button>'}
       <span class="small muted" data-admin-user-status="${esc(user.id)}"></span>
     </form>`).join('')
 
+  const cohortCards = cohorts.map(cohort => {
+    const course = state.data.courses.find(item => item.id === cohort.course_id)
+    const studentLinks = state.data.cohortStudents.filter(item => item.cohort_id === cohort.id)
+    const teacherLinks = state.data.cohortTeachers.filter(item => item.cohort_id === cohort.id)
+    const names = studentLinks.map(link => state.data.users.find(user => user.id === link.student_id)?.display_name || 'Ученик')
+    const teacherRows = teacherLinks.map(link => {
+      const teacher = state.data.users.find(user => user.id === link.teacher_id)
+      return `<span class="assignment-chip">${esc(teacher?.display_name || teacher?.email || 'Преподаватель')}<button type="button" aria-label="Снять преподавателя" data-admin-unassign-teacher="${esc(link.teacher_id)}" data-cohort-id="${esc(cohort.id)}">×</button></span>`
+    }).join('')
+    return `<article class="admin-cohort-card"><div><span class="badge">${esc(course?.level_code || cohort.course_id)}</span><h3>${esc(cohort.title)}</h3></div><div><span class="row-label">Преподаватель</span><div class="assignment-chips">${teacherRows || '<span class="muted">Не назначен</span>'}</div></div><div><span class="row-label">Ученики</span><p class="small">${names.length ? esc(names.join(', ')) : '<span class="muted">Пока нет</span>'}</p></div></article>`
+  }).join('')
+
+  const studentOptions = students.map(user => `<option value="${esc(user.id)}">${esc(user.display_name || user.email || 'Ученик')}</option>`).join('')
+  const teacherOptions = teachers.map(user => `<option value="${esc(user.id)}">${esc(user.display_name || user.email || 'Преподаватель')}</option>`).join('')
+  const courseOptions = courses.map(course => `<option value="${esc(course.id)}">${esc(course.level_code || course.id)} · ${esc(course.title)}</option>`).join('')
+  const cohortOptions = cohorts.map(cohort => `<option value="${esc(cohort.id)}" data-course-id="${esc(cohort.course_id)}">${esc(cohort.course_id)} · ${esc(cohort.title)}</option>`).join('')
+
   const content = `<div class="breadcrumbs"><button data-nav="#/admin/home">Обзор</button><span>›</span><span>Ученики и доступ</span></div>
-    <div class="section-heading"><div><div class="eyebrow">ПОЛЬЗОВАТЕЛИ И РОЛИ</div><h1>Ученики и доступ</h1></div></div>
-    <details class="card disclosure admin-create"><summary>Создать / пригласить пользователя</summary>
-      <form id="admin-invite-form" class="admin-form-grid">
-        <label class="field"><span>Email</span><input name="email" type="email" required autocomplete="off"></label>
-        <label class="field"><span>Имя</span><input name="display_name" required autocomplete="off"></label>
-        <label class="field"><span>Роль</span><select name="role"><option value="student">Ученик</option><option value="teacher">Преподаватель</option><option value="admin">Администратор</option></select></label>
-        <div class="admin-form-actions"><button class="btn" type="submit">Отправить приглашение</button><span class="small muted" data-admin-form-status></span></div>
-      </form>
-    </details>
+    <div class="section-heading"><div><div class="eyebrow">ПОЛЬЗОВАТЕЛИ И ДОСТУП</div><h1>Ученики и доступ</h1></div></div>
+
+    <div class="admin-access-grid">
+      <details class="card disclosure admin-create"><summary>Создать / пригласить пользователя</summary>
+        <form id="admin-invite-form" class="admin-form-grid">
+          <label class="field"><span>Email</span><input name="email" type="email" required autocomplete="off"></label>
+          <label class="field"><span>Имя</span><input name="display_name" required autocomplete="off"></label>
+          <label class="field"><span>Роль</span><select name="role"><option value="student">Ученик</option><option value="teacher">Преподаватель</option><option value="admin">Администратор</option></select></label>
+          <div class="admin-form-actions"><button class="btn" type="submit">Отправить приглашение</button><span class="small muted" data-admin-form-status></span></div>
+        </form>
+      </details>
+
+      <details class="card disclosure"><summary>Создать группу</summary>
+        <form id="admin-cohort-form" class="admin-form-grid">
+          <label class="field"><span>Курс</span><select name="course_id" required><option value="">Выберите курс</option>${courseOptions}</select></label>
+          <label class="field"><span>Название группы</span><input name="title" required placeholder="Например, B2.1 · вечерняя группа"></label>
+          <div class="admin-form-actions"><button class="btn" type="submit">Создать группу</button><span class="small muted" data-admin-form-status></span></div>
+        </form>
+      </details>
+
+      <details class="card disclosure"><summary>Назначить ученику курс</summary>
+        <form id="admin-enrollment-form" class="admin-form-grid">
+          <label class="field"><span>Ученик</span><select name="student_id" required><option value="">Выберите ученика</option>${studentOptions}</select></label>
+          <label class="field"><span>Курс</span><select name="course_id" required><option value="">Выберите курс</option>${courseOptions}</select></label>
+          <label class="field"><span>Группа</span><select name="cohort_id"><option value="">Без группы</option>${cohortOptions}</select></label>
+          <div class="admin-form-actions"><button class="btn" type="submit">Назначить</button><span class="small muted" data-admin-form-status></span></div>
+        </form>
+      </details>
+
+      <details class="card disclosure"><summary>Назначить преподавателя группе</summary>
+        <form id="admin-teacher-cohort-form" class="admin-form-grid">
+          <label class="field"><span>Преподаватель</span><select name="teacher_id" required><option value="">Выберите преподавателя</option>${teacherOptions}</select></label>
+          <label class="field"><span>Группа</span><select name="cohort_id" required><option value="">Выберите группу</option>${cohortOptions}</select></label>
+          <div class="admin-form-actions"><button class="btn" type="submit">Назначить</button><span class="small muted" data-admin-form-status></span></div>
+        </form>
+      </details>
+    </div>
+
+    <section class="card"><div class="section-heading"><h2>Группы и назначения</h2><span class="muted">${cohorts.length}</span></div><div class="admin-cohort-list">${cohortCards || emptyState('Групп пока нет', 'Создайте группу и назначьте курс.')}</div></section>
     <section class="card"><div class="section-heading"><h2>Пользователи</h2><span class="muted">${state.data.users.length}</span></div><div class="admin-user-list">${rows || emptyState('Пользователей пока нет', '')}</div></section>`
   app.innerHTML = shell('admin', content)
 }
@@ -1590,7 +1815,7 @@ app.addEventListener('click', event => {
     if (!order.includes(index)) order.push(index)
     if (hidden) hidden.value = JSON.stringify(order)
     const activity = state.data.activities.find(item => item.id === activityId)
-    const tokens = activity?.payload?.tokens || []
+    const tokens = activity?.payload?.tokens || activity?.payload?.items || []
     if (answer) answer.innerHTML = order.map((tokenIndex, position) => `<button class="order-built-token" type="button" data-order-remove="${position}" data-activity-id="${esc(activityId)}">${esc(tokens[tokenIndex] || '')}</button>`).join('')
     setActivitySaveState(activityId, 'pending')
     saveActivity(activityId, false).catch(showFatal)
@@ -1605,7 +1830,7 @@ app.addEventListener('click', event => {
     order.splice(Number(orderRemove.dataset.orderRemove), 1)
     if (hidden) hidden.value = JSON.stringify(order)
     const activity = state.data.activities.find(item => item.id === activityId)
-    const tokens = activity?.payload?.tokens || []
+    const tokens = activity?.payload?.tokens || activity?.payload?.items || []
     const answer = document.querySelector(`[data-order-answer="${cssEscape(activityId)}"]`)
     if (answer) answer.innerHTML = order.length ? order.map((tokenIndex, position) => `<button class="order-built-token" type="button" data-order-remove="${position}" data-activity-id="${esc(activityId)}">${esc(tokens[tokenIndex] || '')}</button>`).join('') : '<span class="muted">Нажимай слова по порядку.</span>'
     setActivitySaveState(activityId, 'pending')
@@ -1639,6 +1864,16 @@ app.addEventListener('click', event => {
     submitRevision(revision.dataset.submitRevision, revision.dataset.parentSubmission).catch(showFatal)
     return
   }
+  const inlineSpeech = event.target.closest('[data-play-inline-speech]')
+  if (inlineSpeech) {
+    if ('speechSynthesis' in window) {
+      speechSynthesis.cancel()
+      const utterance = new SpeechSynthesisUtterance(inlineSpeech.dataset.speechText || '')
+      utterance.lang = 'de-DE'
+      speechSynthesis.speak(utterance)
+    }
+    return
+  }
   const play = event.target.closest('[data-play-speech]')
   if (play) {
     playSpeech(play.dataset.playSpeech)
@@ -1651,6 +1886,27 @@ app.addEventListener('click', event => {
     else startRecording(activityId).catch(showFatal)
     return
   }
+  const inviteExisting = event.target.closest('[data-admin-invite-existing]')
+  if (inviteExisting && state.profile?.role === 'admin') {
+    const user = state.data.users.find(item => item.id === inviteExisting.dataset.adminInviteExisting)
+    const status = document.querySelector(`[data-admin-user-status="${cssEscape(user?.id || '')}"]`)
+    if (!user?.email) return
+    if (status) status.textContent = 'Отправляем приглашение…'
+    adminApi({ action: 'invite_user', email: user.email, display_name: user.display_name || user.email, role: user.role })
+      .then(refreshAdminData)
+      .catch(error => { if (status) status.textContent = error.message || String(error) })
+    return
+  }
+
+  const unassignTeacher = event.target.closest('[data-admin-unassign-teacher]')
+  if (unassignTeacher && state.profile?.role === 'admin') {
+    if (!window.confirm('Снять преподавателя с этой группы?')) return
+    adminApi({ action: 'unassign_teacher_cohort', teacher_id: unassignTeacher.dataset.adminUnassignTeacher, cohort_id: unassignTeacher.dataset.cohortId })
+      .then(refreshAdminData)
+      .catch(error => window.alert(error.message || String(error)))
+    return
+  }
+
   const adminAction = event.target.closest('[data-admin-activity-action]')
   if (adminAction && state.profile?.role === 'admin') {
     const action = adminAction.dataset.adminActivityAction
@@ -1728,6 +1984,33 @@ app.addEventListener('submit', event => {
     const fd = new FormData(form)
     setStatus('Отправляем приглашение…')
     adminApi({ action: 'invite_user', email: fd.get('email'), display_name: fd.get('display_name'), role: fd.get('role') })
+      .then(refreshAdminData)
+      .catch(error => setStatus(error.message || String(error)))
+    return
+  }
+
+  if (form.id === 'admin-cohort-form') {
+    const fd = new FormData(form)
+    setStatus('Создаём группу…')
+    adminApi({ action: 'create_cohort', course_id: fd.get('course_id'), title: fd.get('title') })
+      .then(refreshAdminData)
+      .catch(error => setStatus(error.message || String(error)))
+    return
+  }
+
+  if (form.id === 'admin-enrollment-form') {
+    const fd = new FormData(form)
+    setStatus('Назначаем курс…')
+    adminApi({ action: 'assign_student_course', student_id: fd.get('student_id'), course_id: fd.get('course_id'), cohort_id: fd.get('cohort_id') })
+      .then(refreshAdminData)
+      .catch(error => setStatus(error.message || String(error)))
+    return
+  }
+
+  if (form.id === 'admin-teacher-cohort-form') {
+    const fd = new FormData(form)
+    setStatus('Назначаем преподавателя…')
+    adminApi({ action: 'assign_teacher_cohort', teacher_id: fd.get('teacher_id'), cohort_id: fd.get('cohort_id') })
       .then(refreshAdminData)
       .catch(error => setStatus(error.message || String(error)))
     return
@@ -1853,7 +2136,7 @@ function p1ReviewAvailable() {
   return Boolean(item && new Date(item.due_at).getTime() <= Date.now())
 }
 const p1StudentProgressBase = studentProgress
-studentProgress = function (moduleId = MODULE_ID) {
+studentProgress = function (moduleId = activeStudentModule()?.id || MODULE_ID) {
   const progress = p1StudentProgressBase(moduleId)
   const item = moduleId === MODULE_ID ? p1ReviewItem() : null
   if (!item || p1ReviewAvailable()) return progress
@@ -1899,7 +2182,7 @@ renderTeacherRoute = function (parts) { if ((parts[1] || 'home') === 'schedule')
 
 primaryNav = function (role, current) {
   const courseActive = current.startsWith('#/student/courses') || current.startsWith('#/student/course') || current.startsWith('#/student/module') || current.startsWith('#/student/section')
-  const items = role === 'student' ? [['Личный кабинет','#/student/home',true,current==='#/student/home'],['Мои курсы','#/student/courses',true,courseActive],['Чтение','',false,false],['Словарь','',false,false],['Повторение','',false,false],['Расписание','#/student/schedule',true,current==='#/student/schedule'],['Мой профиль','',false,false]] : role === 'teacher' ? [['Обзор','#/teacher/home',true,current==='#/teacher/home'],['Материалы A2.1','#/teacher/module/A2.1-M01',true,current.startsWith('#/teacher/module')],['Мои ученики','#/teacher/students',true,current.startsWith('#/teacher/cohort')||current.startsWith('#/teacher/students')],['Расписание','#/teacher/schedule',true,current==='#/teacher/schedule']] : [['Обзор','#/admin/home',true,current==='#/admin/home'],['Ученики и доступ','#/admin/users',true,current.startsWith('#/admin/users')],['Расписание групп','',false,false],['Каталог материалов','#/admin/content',true,current.startsWith('#/admin/content')],['Журнал изменений','',false,false]]
+  const items = role === 'student' ? [['Личный кабинет','#/student/home',true,current==='#/student/home'],['Мои курсы','#/student/courses',true,courseActive],['Чтение','#/student/reader',true,current==='#/student/reader'],['Словарь','',false,false],['Повторение','',false,false],['Расписание','#/student/schedule',true,current==='#/student/schedule'],['Мой профиль','',false,false]] : role === 'teacher' ? [['Обзор','#/teacher/home',true,current==='#/teacher/home'],['Все материалы','#/teacher/courses',true,current.startsWith('#/teacher/courses')||current.startsWith('#/teacher/module')],['Мои ученики','#/teacher/students',true,current.startsWith('#/teacher/cohort')||current.startsWith('#/teacher/students')],['Расписание','#/teacher/schedule',true,current==='#/teacher/schedule']] : [['Обзор','#/admin/home',true,current==='#/admin/home'],['Ученики и доступ','#/admin/users',true,current.startsWith('#/admin/users')],['Расписание групп','',false,false],['Каталог материалов','#/admin/content',true,current.startsWith('#/admin/content')],['Журнал изменений','',false,false]]
   return items.map(([label,href,enabled,active]) => enabled ? `<button class="navlink ${active?'active':''}" data-nav="${href}" ${active?'aria-current="page"':''}><span>${esc(label)}</span></button>` : `<button class="navlink disabled" type="button" disabled aria-disabled="true"><span>${esc(label)}</span><small>позже</small></button>`).join('')
 }
 
@@ -1919,9 +2202,9 @@ renderStudentHome = function () {
     stat.innerHTML = p1ReviewAvailable() ? `<b>Повторение</b><span>Доступно сейчас.</span><button class="inline-link" data-nav="#/student/section/A2.1-M01:review">Перейти →</button>` : `<b>Повторение</b><span>Будет доступно ${esc(new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'short'}).format(new Date(item.due_at)))}.</span><span class="unavailable-label">интервальное повторение</span>`
   }
 }
-function p1TrajectorySession(n) {
-  const t = state.data.moduleSessionTemplates?.find(x=>x.module_id===MODULE_ID&&x.ordinal===n)
-  const session = (state.data.liveSessions || []).filter(x => x.module_id === MODULE_ID && x.ordinal === n && x.status === 'planned' && x.starts_at).sort((a,b)=>new Date(a.starts_at)-new Date(b.starts_at))[0]
+function p1TrajectorySession(moduleId, n) {
+  const t = state.data.moduleSessionTemplates?.find(x=>x.module_id===moduleId&&x.ordinal===n)
+  const session = (state.data.liveSessions || []).filter(x => x.module_id === moduleId && x.ordinal === n && x.status === 'planned' && x.starts_at).sort((a,b)=>new Date(a.starts_at)-new Date(b.starts_at))[0]
   const duration = Number(t?.duration_minutes || session?.duration_minutes || 90)
   const action = session
     ? `${esc(new Intl.DateTimeFormat('ru-RU',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}).format(new Date(session.starts_at)))} →`
@@ -1936,7 +2219,7 @@ renderStudentModule = function (moduleId) {
   if (list) {
     list.classList.add('module-trajectory')
     const rows = xs => xs.map(x=>`<div class="trajectory-step">${sectionRow(x)}</div>`).join('')
-    list.innerHTML = `${rows(sections.filter(x=>x.ordinal<=4))}${p1TrajectorySession(1)}${rows(sections.filter(x=>x.ordinal>=5&&x.ordinal<=7))}${p1TrajectorySession(2)}${rows(sections.filter(x=>x.ordinal>=8))}`
+    list.innerHTML = `${rows(sections.filter(x=>x.ordinal<=4))}${p1TrajectorySession(module.id, 1)}${rows(sections.filter(x=>x.ordinal>=5&&x.ordinal<=7))}${p1TrajectorySession(module.id, 2)}${rows(sections.filter(x=>x.ordinal>=8))}`
   }
   const h=[...document.querySelectorAll('.section-heading.spaced')].find(x=>x.textContent.includes('Занятия в структуре модуля')); if(h){h.nextElementSibling?.remove();h.remove()}
 }
@@ -1947,9 +2230,9 @@ function p1Signals() {
   const out=[]
   for(const student of state.data.students){
     const old = state.data.submissions.some(x=>x.student_id===student.id&&['submitted','in_review'].includes(x.status)&&new Date(x.submitted_at||x.created_at).getTime()<Date.now()-48*60*60*1000)
-    const p = state.data.progress.find(x=>x.student_id===student.id&&x.module_id===MODULE_ID)
+    const latestProgress = [...state.data.progress.filter(x=>x.student_id===student.id)].sort((a,b)=>new Date(b.updated_at||0)-new Date(a.updated_at||0))[0]
     if(old) out.push({student,text:'Работа ждёт проверки больше 48 часов'})
-    if(p?.updated_at&&new Date(p.updated_at).getTime()<Date.now()-7*24*60*60*1000) out.push({student,text:'Нет значимой активности больше 7 дней'})
+    if(latestProgress?.updated_at&&new Date(latestProgress.updated_at).getTime()<Date.now()-7*24*60*60*1000) out.push({student,text:'Нет значимой активности больше 7 дней'})
   }
   return out
 }
@@ -1961,9 +2244,9 @@ renderTeacherHome = function () {
   const signals=p1Signals(), before=content.querySelector('.section-heading')
   if(before) before.insertAdjacentHTML('beforebegin',`<section class="teacher-action-grid"><div class="card"><div class="section-heading"><h2>Ближайшие занятия</h2><button class="inline-link" data-nav="#/teacher/schedule">Расписание →</button></div>${sessions.length?`<div class="schedule-list">${sessions.slice(0,3).map(x=>p1SessionCard(x,'teacher')).join('')}</div>`:emptyState('Занятий пока нет','Даты появятся после назначения расписания.')}</div><div class="card"><div class="section-heading"><h2>Требуют внимания</h2></div>${signals.length?`<div class="signal-list">${signals.slice(0,5).map(x=>`<div class="signal-row"><strong>${esc(x.student.display_name||x.student.email||'Ученик')}</strong><span>${esc(x.text)}</span></div>`).join('')}</div>`:'<p class="muted">Критичных сигналов сейчас нет.</p>'}</div></section>`)
 }
-function teacherSectionProgress(progress) {
+function teacherSectionProgress(progress, moduleId) {
   const states = progress?.section_states || {}
-  return state.data.sections.filter(x=>x.module_id===MODULE_ID).sort((a,b)=>a.ordinal-b.ordinal).map(section => {
+  return state.data.sections.filter(x=>x.module_id===moduleId).sort((a,b)=>a.ordinal-b.ordinal).map(section => {
     const item = states[section.id] || states[section.legacy_key] || {}
     const done = Number(item.done || 0)
     const total = Number(item.total || state.data.activities.filter(activity => activity.section_id === section.id && activity.status !== 'archived').length)
@@ -1981,16 +2264,25 @@ const p1TeacherCohortBase = renderTeacherCohort
 renderTeacherCohort = function (cohortId) {
   p1TeacherCohortBase(cohortId)
   const cohort=state.data.cohorts.find(x=>x.id===cohortId), list=document.querySelector('.student-list'); if(!cohort||!list)return
+  const courseModules=state.data.modules.filter(x=>x.course_id===cohort.course_id).sort((a,b)=>a.ordinal-b.ordinal)
   const links=state.data.cohortStudents.filter(x=>x.cohort_id===cohort.id)
   list.innerHTML=links.map(link=>{
-    const student=state.data.students.find(x=>x.id===link.student_id), p=state.data.progress.find(x=>x.student_id===link.student_id&&x.module_id===MODULE_ID), section=state.data.sections.find(x=>x.id===p?.current_section_id), pending=state.data.submissions.filter(x=>x.student_id===link.student_id&&['submitted','in_review'].includes(x.status)), last=p1LatestActivity(link.student_id)
-    const attempts = state.data.attempts.filter(x=>x.student_id===link.student_id).length
-    const submitted = state.data.submissions.filter(x=>x.student_id===link.student_id&&x.status!=='draft').length
-    const progressItems = teacherSectionProgress(p)
+    const student=state.data.students.find(x=>x.id===link.student_id)
+    const progressRows=state.data.progress.filter(x=>x.student_id===link.student_id&&courseModules.some(module=>module.id===x.module_id)).sort((a,b)=>new Date(b.updated_at||0)-new Date(a.updated_at||0))
+    const p=progressRows[0] || null
+    const module=courseModules.find(x=>x.id===p?.module_id) || courseModules[0]
+    const section=state.data.sections.find(x=>x.id===p?.current_section_id)
+    const courseActivityIds=new Set(state.data.sections.filter(x=>x.module_id===module?.id).flatMap(sectionItem=>state.data.activities.filter(a=>a.section_id===sectionItem.id).map(a=>a.id)))
+    const pending=state.data.submissions.filter(x=>x.student_id===link.student_id&&courseActivityIds.has(x.activity_id)&&['submitted','in_review'].includes(x.status))
+    const last=p1LatestActivity(link.student_id)
+    const attempts = state.data.attempts.filter(x=>x.student_id===link.student_id&&courseActivityIds.has(x.activity_id)).length
+    const submitted = state.data.submissions.filter(x=>x.student_id===link.student_id&&courseActivityIds.has(x.activity_id)&&x.status!=='draft').length
+    const progressItems = module ? teacherSectionProgress(p,module.id) : []
     const metrics = `Прогресс ${Math.round(Number(p?.completion_percent||0))}% · ${ruCount(attempts,['попытка','попытки','попыток'])} · ${ruCount(submitted,['отправленная работа','отправленные работы','отправленных работ'])}`
-    return `<article class="student-action-row"><div class="student-action-main"><strong>${esc(student?.display_name||student?.email||'Ученик')}</strong><span class="muted">${esc(student?.email||'')}</span></div><div><span class="row-label">Текущий раздел</span><strong>${esc(section?.title||'Модуль не начат')}</strong></div><div><span class="row-label">Реакция</span>${pending.length?`<span class="status-pill warn">${pending.length} ждёт проверки</span>`:'<span class="muted">Не требуется</span>'}</div><div><span class="row-label">Последняя активность</span><span>${last?esc(formatDate(last)):'—'}</span></div><details class="student-detail"><summary>Подробнее</summary><div class="student-detail-block"><strong>Прогресс по модулю</strong><div class="student-section-progress">${progressItems.map(item=>`<div><span>${esc(item.title)}</span><span class="muted">${esc(item.label)}</span></div>`).join('')}</div><p class="small muted student-detail-metrics">${esc(metrics)}</p></div></details></article>`
+    return `<article class="student-action-row"><div class="student-action-main"><strong>${esc(student?.display_name||student?.email||'Ученик')}</strong><span class="muted">${esc(student?.email||'')}</span></div><div><span class="row-label">Текущий раздел</span><strong>${esc(section?.title||module?.title||'Курс не начат')}</strong></div><div><span class="row-label">Реакция</span>${pending.length?`<span class="status-pill warn">${pending.length} ждёт проверки</span>`:'<span class="muted">Не требуется</span>'}</div><div><span class="row-label">Последняя активность</span><span>${last?esc(formatDate(last)):'—'}</span></div><details class="student-detail"><summary>Подробнее</summary><div class="student-detail-block"><strong>${esc(module?.title||'Прогресс по модулю')}</strong><div class="student-section-progress">${progressItems.map(item=>`<div><span>${esc(item.title)}</span><span class="muted">${esc(item.label)}</span></div>`).join('')}</div><p class="small muted student-detail-metrics">${esc(metrics)}</p></div></details></article>`
   }).join('')||emptyState('В группе нет учеников','Назначение учеников выполняется через серверные операции.')
 }
+
 const p1TeacherModuleBase = renderTeacherModule
 renderTeacherModule = function (moduleId) {
   p1TeacherModuleBase(moduleId)
