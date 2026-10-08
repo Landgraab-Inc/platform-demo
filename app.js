@@ -371,21 +371,18 @@ function shell(role, content, aside = '', options = {}) {
 }
 
 function renderAuth(message = '') {
-  app.innerHTML = `<main class="auth-shell">
-    <section class="auth-intro">
-      <div class="auth-brand"><img class="lernstep-logo" src="./assets/lernstep-logo.svg" alt="Lernstep"></div>
-      <div class="eyebrow">УЧЕБНАЯ ПЛАТФОРМА</div>
-      <h1>Продолжай с того места, где остановился.</h1>
-      <p>Курсы, модули, задания, занятия и обратная связь — в одном рабочем пространстве.</p>
-    </section>
-    <section class="auth-panel card">
-      <h2>Войти</h2>
-      ${message ? `<div class="notice error">${esc(message)}</div>` : ''}
-      <form id="login-form">
-        <label class="field"><span>Email</span><input name="email" type="email" autocomplete="username" required></label>
-        <label class="field"><span>Пароль</span><input name="password" type="password" autocomplete="current-password" required></label>
-        <button class="btn" type="submit">Войти в платформу</button>
-      </form>
+  app.innerHTML = `<main class="auth-shell auth-login-shell">
+    <section class="auth-login-stack">
+      <div class="auth-brand auth-login-brand"><img class="lernstep-logo" src="./assets/lernstep-logo.svg" alt="Lernstep"></div>
+      <section class="auth-panel card auth-login-panel">
+        <h1>Войти</h1>
+        ${message ? `<div class="notice error">${esc(message)}</div>` : ''}
+        <form id="login-form">
+          <label class="field"><span>Email</span><input name="email" type="email" autocomplete="username" required></label>
+          <label class="field"><span>Пароль</span><input name="password" type="password" autocomplete="current-password" required></label>
+          <button class="btn" type="submit">Войти</button>
+        </form>
+      </section>
     </section>
   </main>`
 }
