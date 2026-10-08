@@ -626,16 +626,31 @@ function renderStudentSection(sectionId) {
   saveStudentProgress(section.id).catch(console.error)
 }
 
+function activityReviewLabel(activity) {
+  const mode = activity?.grading?.mode
+  if (activity?.teacher_review_required || mode === 'teacher_review') return 'Проверит преподаватель'
+  if (mode === 'auto') return 'Проверяется автоматически'
+  if (mode === 'model_answer' || mode === 'acknowledge') return 'Сверь с образцом'
+  return 'Самопроверка'
+}
+
+function activitySaveLabel(activity) {
+  return activity?.teacher_review_required || activity?.grading?.mode === 'teacher_review'
+    ? 'Сохранить черновик'
+    : 'Сохранить'
+}
+
 function renderStudentActivity(activity) {
   const p = activity.payload || {}
   const attempt = attemptFor(activity.id)
   const status = activityStateLabel(activity)
-  const header = `<div class="activity-head"><div><span class="activity-kicker">${esc(activity.skill || 'задание')}</span><h2>${esc(activity.title)}</h2></div><span class="activity-status ${activityComplete(activity) ? 'done' : ''}">${esc(status)}</span></div>`
-  const instruction = `${p.instruction ? `<p class="task-instruction" lang="de">${esc(p.instruction)}</p>` : ''}${p.system_note ? `<p class="system-note">${esc(p.system_note)}</p>` : ''}`
+  const header = `<div class="activity-head"><div><span class="activity-kicker">${esc(activity.skill || 'задание')}</span><h2 class="activity-title">${esc(activity.title)}</h2></div><span class="activity-status ${activityComplete(activity) ? 'done' : ''}">${esc(status)}</span></div>`
+  const instruction = `${p.instruction ? `<p class="task-instruction" lang="de">${esc(p.instruction)}</p>` : ''}<div class="review-mode">${esc(activityReviewLabel(activity))}</div>${p.system_note ? `<p class="system-note">${esc(p.system_note)}</p>` : ''}`
   const prompt = p.prompt ? `<div class="prompt-box">${lines(p.prompt)}</div>` : ''
   const source = Array.isArray(p.source) ? `<div class="chat">${p.source.map(item => `<div class="bubble"><strong>${esc(item.speaker)}</strong><br><span lang="de">${esc(item.text)}</span></div>`).join('')}</div>` : ''
   const items = Array.isArray(p.items) ? `<div class="lex-list">${p.items.map(item => `<span>${esc(item)}</span>`).join('')}</div>` : ''
-  const support = p.support ? `<details class="support"><summary>Опора / проверить себя</summary><div>${lines(p.support)}</div></details>` : ''
+  const supportLabel = activity.grading?.mode === 'model_answer' ? 'Сверить с образцом' : activity.grading?.mode === 'self_review' ? 'Самопроверка' : 'Опора / проверить себя'
+  const support = p.support ? `<details class="support"><summary>${esc(supportLabel)}</summary><div>${lines(p.support)}</div></details>` : ''
   const explanation = p.explanation ? `<div class="notice">${esc(p.explanation)}</div>` : ''
 
   if (activity.type === 'model') {
@@ -673,7 +688,7 @@ function renderStudentActivity(activity) {
   const project = activity.id.endsWith(':project') ? projectSubmissionBlock(activity) : ''
   if (activity.id.endsWith(':revision')) return renderRevisionActivity(activity)
 
-  return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${explanation}${prompt}${source}${items}${listening}${speaking}<label class="field"><span>Мой ответ</span><textarea data-activity-input="${esc(activity.id)}" placeholder="${esc(p.placeholder || '')}">${esc(value)}</textarea></label><div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Сохранить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}">${attempt ? 'Ответ загружен с сервера.' : ''}</span></div>${project}${support}</article>`
+  return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${explanation}${prompt}${source}${items}${listening}${speaking}<label class="field"><span>Мой ответ</span><textarea data-activity-input="${esc(activity.id)}" placeholder="${esc(p.placeholder || '')}">${esc(value)}</textarea></label><div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">${esc(activitySaveLabel(activity))}</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}">${attempt ? 'Ответ загружен с сервера.' : ''}</span></div>${project}${support}</article>`
 }
 
 function projectSubmissionBlock(activity) {
