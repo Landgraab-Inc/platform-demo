@@ -27,9 +27,9 @@ p{margin-bottom:14px}
 
 .app-shell{min-height:100vh}
 .sidebar{position:fixed;inset:0 auto 0 0;width:236px;background:white;border-right:1px solid var(--line);display:flex;flex-direction:column;padding:28px 18px 16px;z-index:20}
-.brand{display:flex;align-items:center;gap:10px;text-align:left;background:transparent;border:0;color:var(--ink);padding:0 10px 24px;font-size:18px;font-weight:800;line-height:1.05;letter-spacing:.045em;width:100%;transition:transform .12s ease,opacity .12s ease}
-.brand small{display:block;font-weight:500;font-size:10px;letter-spacing:.07em;margin-top:5px;color:var(--muted)}
-.brandmark{width:37px;height:43px;border:3px solid var(--purple);border-right:9px solid var(--green);border-radius:11px 0 11px 0;display:grid;place-items:center;font-size:22px;color:var(--purple);flex:0 0 auto}
+.brand{display:flex;align-items:center;text-align:left;background:transparent;border:0;color:var(--ink);padding:0 10px 24px;width:100%;transition:transform .12s ease,opacity .12s ease}
+.lernstep-wordmark{display:inline-block;font-size:25px;font-weight:790;line-height:1;letter-spacing:-.045em;color:var(--purple-dark)}
+.brand .lernstep-wordmark{font-size:24px}
 .role-label{margin:10px 12px 7px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--purple);font-weight:800}
 .navscroll{overflow-y:auto;min-height:0;padding-right:2px}
 .navlink{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;min-height:46px;padding:10px 14px;border:0;border-radius:9px;background:transparent;color:#5b5564;text-align:left;font-size:15px;margin-bottom:4px;transition:background .14s ease,color .14s ease,transform .12s ease,box-shadow .12s ease}
@@ -200,6 +200,11 @@ p{margin-bottom:14px}
 .notice.success{background:#edf4da;color:#3e5315}
 
 .auth-shell{min-height:100vh;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(360px,.65fr);align-items:center;gap:72px;max-width:1120px;margin:0 auto;padding:8vh 28px}
+.auth-state-shell{grid-template-columns:minmax(320px,620px);justify-content:center}
+.auth-brand{margin-bottom:28px}
+.auth-intro .auth-brand{margin-bottom:42px}
+.auth-intro .lernstep-wordmark{font-size:31px}
+.auth-panel .lernstep-wordmark{font-size:23px}
 .auth-intro h1{font-size:clamp(40px,6vw,66px);max-width:720px}
 .auth-intro p{font-size:19px;color:var(--muted);max-width:620px}
 .auth-panel{padding:28px}
@@ -223,7 +228,7 @@ p{margin-bottom:14px}
 @media(max-width:760px){
   .sidebar{position:static;width:auto;height:auto;border-right:0;border-bottom:1px solid var(--line);padding:15px 14px 10px}
   .brand{padding:0 4px 12px}
-  .brandmark{width:30px;height:34px;border-width:2px;border-right-width:7px;font-size:17px}
+  .brand .lernstep-wordmark{font-size:22px}
   .role-label{margin:4px 4px 7px}
   .navscroll{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
   .navlink{min-width:max-content;margin:0;min-height:40px;padding:8px 11px}
@@ -251,3 +256,133 @@ p{margin-bottom:14px}
   *{transition:none!important;animation:none!important;scroll-behavior:auto!important}
   .btn:active,.is-pressed{transform:none!important}
 }
+
+.skip-link{position:fixed;top:-80px;left:16px;z-index:100;padding:12px;background:white;color:var(--purple-dark);border:2px solid var(--purple);border-radius:8px}
+.skip-link:focus{top:10px}
+.disclosure summary{cursor:pointer;font-weight:700;padding:4px 0 12px}
+.disclosure[open] summary{margin-bottom:12px}
+.mobile-section-nav{display:none}
+@media(max-width:760px){
+  .mobile-section-nav{display:block;background:white;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:18px}
+  .mobile-section-nav summary{cursor:pointer;font-weight:700}
+  .mobile-section-links{display:grid;gap:3px;margin-top:12px}
+  .mobile-section-links .navlink{min-height:44px;white-space:normal}
+  .navlink,.btn.text{min-height:44px}
+  .submit-box{flex-direction:column;align-items:stretch}
+  .activity-head{flex-wrap:wrap}
+  .session-grid .section-heading{flex-wrap:wrap}
+}
+
+/* P0 hardening: grammar scaffolding and save-state affordances */
+.model-examples{display:grid;gap:8px;margin:14px 0}
+.model-examples .prompt-box{margin:0}
+.word-order-bank,.word-order-answer{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+.word-order-answer{min-height:54px;align-items:center;padding:10px;border:1px dashed var(--line);border-radius:12px;background:#fbfafc}
+.order-token,.order-built-token{min-height:44px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);font:inherit}
+.order-token:hover,.order-built-token:hover{border-color:#b9abc9;background:var(--soft)}
+.order-built-token{background:var(--soft);border-color:#d8cde4}
+.save-status[data-save-state="pending"]{color:#775f16}
+.save-status[data-save-state="saving"]{color:var(--purple-dark)}
+.save-status[data-save-state="saved"]{color:var(--green-dark)}
+.save-status[data-save-state="error"]{color:var(--danger)}
+@media(max-width:760px){.order-token,.order-built-token{min-height:48px}.word-order-answer{min-height:58px}}
+
+/* P0 hardening: focused teacher review + feedback/revision */
+.review-context{display:grid;grid-template-columns:minmax(0,1fr) 180px;gap:14px;margin:18px 0}
+.review-context>div{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px}
+.review-context>div:nth-child(2),.review-context>div:nth-child(4){grid-column:1 / -1}
+.review-context p{margin:6px 0 0}
+.review-context .submission-text{margin-top:8px}
+.teacher-rubric,.revision-checklist{display:grid;gap:9px;margin:14px 0}
+.teacher-rubric label,.revision-checklist label{display:flex;gap:9px;align-items:flex-start}
+.teacher-rubric input,.revision-checklist input{width:18px;height:18px;margin-top:1px}
+.rubric-list{list-style:none;padding:0;margin:13px 0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.rubric-list li{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:9px;background:#f8f6fa}
+.rubric-list li.ok{background:#edf4da;color:#3e5315}
+.rubric-list li.needs-work{background:#fff6e8;color:#755316}
+.revision-checklist{border:0;padding:0}
+.revision-checklist legend{font-weight:750;margin-bottom:8px}
+@media(max-width:760px){
+  .review-context{grid-template-columns:1fr}
+  .review-context>div:nth-child(2),.review-context>div:nth-child(4){grid-column:auto}
+  .rubric-list{grid-template-columns:1fr}
+}
+
+
+/* P1 hardening */
+.task-instruction{font-weight:700;margin-bottom:8px}
+.system-note{margin:-2px 0 14px;color:var(--muted);font-size:14px;line-height:1.45}
+.loading-card{max-width:460px}
+.module-trajectory{display:grid;gap:10px}
+.trajectory-step .section-row{width:100%}
+.trajectory-session{display:flex;justify-content:space-between;gap:16px;align-items:center;border:1px solid #d9cfea;background:#f8f5fb;border-radius:12px;padding:12px 14px;margin:3px 0 6px}
+.trajectory-session-main{display:grid;gap:2px}.trajectory-session h3{margin:0;font-size:16px}.trajectory-session p{margin:0;font-size:13px}.trajectory-session-action{flex:0 0 auto}
+.scheduled-session{display:grid;grid-template-columns:112px minmax(0,1fr) auto;gap:16px;align-items:center;padding:14px 0;border-bottom:1px solid var(--line)}
+.scheduled-session:last-child{border-bottom:0}.scheduled-session-date{display:grid;gap:3px}.scheduled-session-date span{color:var(--muted)}
+.scheduled-session-main h3{margin:5px 0 3px;font-size:18px}.scheduled-session-main p{margin:0}.scheduled-session-action{min-width:0}
+.btn.compact{padding:8px 12px;font-size:14px}.schedule-list{display:grid}
+.teacher-action-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(260px,.75fr);gap:18px;margin:22px 0}
+.teacher-action-grid .card{margin:0}.signal-list{display:grid;gap:10px}.signal-row{display:grid;gap:3px;padding:10px 0;border-bottom:1px solid var(--line)}.signal-row:last-child{border-bottom:0}
+.student-action-row{display:grid;grid-template-columns:minmax(180px,1.3fr) minmax(170px,1fr) minmax(150px,.8fr) minmax(140px,.8fr);gap:14px;padding:18px 0;border-bottom:1px solid var(--line);align-items:start}
+.student-action-main{display:grid}.row-label{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.student-detail{grid-column:1/-1}.student-detail summary{cursor:pointer;color:var(--purple-dark);font-weight:650}.student-detail-block{padding:12px 0 4px}.student-section-progress{display:grid;gap:0;margin-top:10px;border-top:1px solid var(--line)}.student-section-progress>div{display:flex;justify-content:space-between;gap:18px;padding:8px 0;border-bottom:1px solid var(--line)}.student-section-progress>div span:last-child{white-space:nowrap}.student-detail-metrics{margin:12px 0 0}
+.listening-phase{border-left:3px solid var(--purple);padding:10px 14px;margin:12px 0;background:#faf8fc}.listening-phase p{margin:3px 0 10px}.phase-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--purple-dark);font-weight:750}
+.footeractions{margin-top:30px;margin-bottom:16px}.footeractions + .small.muted{margin-top:14px;line-height:1.5}
+.activity-actions{row-gap:10px}.activity-actions .save-status{flex-basis:100%;margin-top:2px}
+.mobile-section-nav summary{min-height:48px;display:flex;align-items:center}
+@media(max-width:960px){.teacher-action-grid{grid-template-columns:1fr}.student-action-row{grid-template-columns:1fr 1fr}}
+@media(max-width:760px){
+  .scheduled-session{grid-template-columns:1fr;gap:8px}.scheduled-session-action{justify-self:start}
+  .trajectory-session{align-items:flex-start;flex-direction:column;gap:8px}.trajectory-session-action{min-height:44px}
+  .student-action-row{grid-template-columns:1fr}.student-detail{grid-column:auto}.student-section-progress>div{align-items:flex-start}.student-section-progress>div span:last-child{white-space:normal;text-align:right}
+  .footeractions{display:grid;grid-template-columns:1fr;gap:12px}.footeractions .btn{width:100%;min-height:48px;white-space:normal;text-align:center}
+  .activity-card{padding:18px}.activity-actions .btn{min-height:48px;white-space:normal}
+  .lessonbody>.small.muted{padding:0 2px 8px}
+}
+
+.rail-card .scheduled-session{grid-template-columns:1fr;gap:7px;padding:10px 0}.rail-card .scheduled-session-main h3{font-size:16px}.rail-card .scheduled-session-action{justify-self:start}.deferred-review{margin-top:14px}
+
+
+/* P1 acceptance: task-first hierarchy and visible review mode */
+.activity-title{font-size:17px!important;line-height:1.3!important;font-weight:650!important;color:var(--muted)!important;letter-spacing:-.01em!important}
+.task-instruction{font-size:22px;line-height:1.3;font-weight:760;color:var(--ink);margin:2px 0 8px}
+.review-mode{display:inline-flex;align-items:center;min-height:28px;padding:5px 9px;border-radius:8px;background:#f3f0f7;color:var(--purple-dark);font-size:12px;font-weight:750;margin:0 0 10px}
+.system-note{margin:0 0 14px}
+@media(max-width:760px){.task-instruction{font-size:20px}.activity-title{font-size:16px!important}}
+
+
+/* Minimal Admin MVP */
+.admin-action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.admin-action-card{text-align:left;margin:0;cursor:pointer;min-height:190px;display:flex;flex-direction:column;align-items:flex-start}
+.admin-action-card h2{font-size:24px;margin:4px 0 8px}.admin-action-card p{color:var(--muted)}.admin-action-card .card-link{margin-top:auto}
+.admin-user-list,.admin-section-stack,.admin-activity-list,.admin-module-links{display:grid;gap:10px}
+.admin-user-row{display:grid;grid-template-columns:minmax(220px,1.5fr) minmax(135px,.7fr) minmax(150px,.7fr) auto;gap:12px;align-items:end;padding:14px 0;border-bottom:1px solid var(--line)}
+.admin-user-row:last-child{border-bottom:0}.admin-user-main{display:grid;gap:2px}
+.compact-field{display:grid;gap:5px}.compact-field span{font-size:11px;font-weight:750;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.compact-field select,.field select{width:100%;min-height:44px;border:1px solid #c9c3d1;border-radius:9px;padding:8px 11px;background:#fff;color:var(--ink)}
+.admin-form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.admin-form-grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.admin-form-actions{grid-column:1/-1;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:4px}
+.admin-course-card{display:grid;grid-template-columns:minmax(220px,.7fr) minmax(0,1.3fr);gap:22px;align-items:start}
+.admin-course-card h2{margin:10px 0 7px}.admin-module-links .module-card{min-height:72px}
+.admin-section summary{display:flex;justify-content:space-between;align-items:center;gap:12px}.admin-section summary span{display:grid;gap:3px}.admin-section summary small{color:var(--muted);font-weight:500}
+.admin-activity-row{display:grid;grid-template-columns:34px minmax(0,1fr) auto auto auto;gap:10px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.admin-activity-row>div:nth-child(2){display:grid;gap:2px}.activity-order{display:grid;place-items:center;width:30px;height:30px;border-radius:8px;background:var(--soft);font-size:12px;font-weight:800}
+.admin-order-actions{display:flex;gap:2px}.admin-order-actions .btn{min-width:40px}
+.admin-add-link{margin-top:14px}.muted-status{opacity:.65}
+.admin-editor-card{max-width:840px}.admin-lifecycle{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}
+.admin-preview{max-width:840px;margin-top:26px}.admin-preview .activity-card{box-shadow:0 8px 26px rgba(45,35,60,.04)}.admin-preview button:disabled,.admin-preview input:disabled,.admin-preview textarea:disabled{opacity:.78}
+.admin-preview textarea:disabled,.admin-preview input:disabled{background:#fbfafc;color:var(--ink)}
+@media(max-width:980px){.admin-user-row{grid-template-columns:minmax(180px,1fr) 1fr 1fr}.admin-user-row>.btn{grid-column:2}.admin-course-card{grid-template-columns:1fr}.admin-form-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:760px){
+  .admin-action-grid,.admin-form-grid,.admin-form-grid.two{grid-template-columns:1fr}
+  .admin-user-row{grid-template-columns:1fr;align-items:stretch}.admin-user-row>.btn{grid-column:auto;width:100%}
+  .admin-activity-row{grid-template-columns:30px minmax(0,1fr) auto}.admin-activity-row>.status-pill{grid-column:2}.admin-order-actions{grid-column:2}.admin-activity-row>.btn{grid-column:3;grid-row:1/3}
+  .admin-lifecycle{display:grid}.admin-lifecycle .btn{width:100%}
+}
+
+
+/* Focused platform UX/content cleanup */
+.schedule-card{padding-top:8px}
+.admin-meta-line{display:flex;gap:18px;flex-wrap:wrap;margin:4px 0 10px;padding:10px 12px;border-radius:9px;background:#f8f6fa;color:var(--muted);font-size:13px}
+@media(max-width:900px){.trajectory-session{padding:11px 13px}.student-action-row{gap:11px}}
+@media(max-width:760px){.schedule-card{padding:8px 14px 14px}.admin-meta-line{display:grid;gap:5px}}
