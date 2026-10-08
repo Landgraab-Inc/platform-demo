@@ -152,7 +152,7 @@ async function boot() {
   }
 
   state.profile = profile
-  app.innerHTML = '<main class="auth-shell auth-state-shell"><section class="auth-panel card loading-card" role="status" aria-live="polite"><div class="auth-brand"><span class="lernstep-logo" role="img" aria-label="Lernstep"></span></div><h2>Загружаем данные…</h2><p class="muted">Подготавливаем ваше рабочее пространство.</p></section></main>'
+  app.innerHTML = '<main class="auth-shell auth-state-shell"><section class="auth-panel card loading-card" role="status" aria-live="polite"><div class="auth-brand"><img class="lernstep-logo" src="./assets/lernstep-logo.svg" alt="Lernstep"></div><h2>Загружаем данные…</h2><p class="muted">Подготавливаем ваше рабочее пространство.</p></section></main>'
   if (profile.role === 'student') state.data = await loadStudentData()
   if (profile.role === 'teacher') state.data = await loadTeacherData()
   if (profile.role === 'admin') state.data = await loadAdminData()
@@ -350,7 +350,7 @@ function shell(role, content, aside = '', options = {}) {
   return `<main class="app-shell"><a class="skip-link" href="#main-content">Перейти к содержанию</a>
     <aside class="sidebar">
       <button class="brand" data-nav="#/${role}/home" aria-label="Lernstep · На главную">
-        <span class="lernstep-logo lernstep-logo-sidebar" aria-hidden="true"></span>
+        <img class="lernstep-logo lernstep-logo-sidebar" src="./assets/lernstep-logo.svg" alt="">
       </button>
       <div class="role-label">${roleWorkspaceLabel(role)}</div>
       <div class="navscroll">
@@ -373,7 +373,7 @@ function shell(role, content, aside = '', options = {}) {
 function renderAuth(message = '') {
   app.innerHTML = `<main class="auth-shell">
     <section class="auth-intro">
-      <div class="auth-brand"><span class="lernstep-logo" role="img" aria-label="Lernstep"></span></div>
+      <div class="auth-brand"><img class="lernstep-logo" src="./assets/lernstep-logo.svg" alt="Lernstep"></div>
       <div class="eyebrow">УЧЕБНАЯ ПЛАТФОРМА</div>
       <h1>Продолжай с того места, где остановился.</h1>
       <p>Курсы, модули, задания, занятия и обратная связь — в одном рабочем пространстве.</p>
@@ -391,11 +391,11 @@ function renderAuth(message = '') {
 }
 
 function renderUnprovisioned() {
-  app.innerHTML = '<main class="auth-shell auth-state-shell"><section class="auth-panel card narrow"><div class="auth-brand"><span class="lernstep-logo" role="img" aria-label="Lernstep"></span></div><span class="badge">Аккаунт создан</span><h1>Доступ ещё не назначен</h1><p>Для этого аккаунта пока не назначены роль и доступ к учебному пространству.</p><button class="btn secondary" data-logout>Выйти</button></section></main>'
+  app.innerHTML = '<main class="auth-shell auth-state-shell"><section class="auth-panel card narrow"><div class="auth-brand"><img class="lernstep-logo" src="./assets/lernstep-logo.svg" alt="Lernstep"></div><span class="badge">Аккаунт создан</span><h1>Доступ ещё не назначен</h1><p>Для этого аккаунта пока не назначены роль и доступ к учебному пространству.</p><button class="btn secondary" data-logout>Выйти</button></section></main>'
 }
 
 function renderBlocked(status) {
-  app.innerHTML = `<main class="auth-shell auth-state-shell"><section class="auth-panel card narrow"><div class="auth-brand"><span class="lernstep-logo" role="img" aria-label="Lernstep"></span></div><h1>Доступ к платформе ограничен</h1><p>Статус аккаунта: ${esc(status)}.</p><button class="btn secondary" data-logout>Выйти</button></section></main>`
+  app.innerHTML = `<main class="auth-shell auth-state-shell"><section class="auth-panel card narrow"><div class="auth-brand"><img class="lernstep-logo" src="./assets/lernstep-logo.svg" alt="Lernstep"></div><h1>Доступ к платформе ограничен</h1><p>Статус аккаунта: ${esc(status)}.</p><button class="btn secondary" data-logout>Выйти</button></section></main>`
 }
 
 function renderStudentRoute(parts) {
@@ -1568,7 +1568,7 @@ app.addEventListener('click', event => {
     return
   }
   if (event.target.closest('[data-retry-boot]')) {
-    app.innerHTML = '<main class="auth-shell auth-state-shell"><section class="auth-panel card loading-card" role="status" aria-live="polite"><div class="auth-brand"><span class="lernstep-logo" role="img" aria-label="Lernstep"></span></div><h2>Повторяем загрузку…</h2></section></main>'
+    app.innerHTML = '<main class="auth-shell auth-state-shell"><section class="auth-panel card loading-card" role="status" aria-live="polite"><div class="auth-brand"><img class="lernstep-logo" src="./assets/lernstep-logo.svg" alt="Lernstep"></div><h2>Повторяем загрузку…</h2></section></main>'
     boot().catch(showFatal)
     return
   }
