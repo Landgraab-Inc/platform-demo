@@ -1,0 +1,41 @@
+name: Build Lernstep release
+
+on:
+  push:
+    paths:
+      - 'release-src/**'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        working-directory: release-src
+        run: npm install --no-audit --no-fund
+      - name: Build bundled app
+        working-directory: release-src
+        env:
+          VITE_SUPABASE_URL: https://jiczytytsapzfljkbhne.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_j__PxwdyHlNQ4xAnKLnEvQ_DU5U-RvO
+        run: npm run build
+      - name: Publish bundle to Pages root
+        run: |
+          cp release-src/dist/index.html ./index.html
+          rm -rf ./assets
+          cp -R release-src/dist/assets ./assets
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html assets
+          if git diff --cached --quiet; then
+            echo "No release changes"
+            exit 0
+          fi
+          git commit -m "build: publish bundled Lernstep MVP1"
+          git push
