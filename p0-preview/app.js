@@ -22,7 +22,8 @@ const state = {
   savePromises: new Map(),
   saveStates: new Map(),
   pendingDrafts: new Map(),
-  recording: null
+  recording: null,
+  speechActivityId: null
 }
 
 const SECTION_COPY = {
@@ -212,9 +213,11 @@ async function loadAdminData() {
   const enrollments = await selectAll('enrollments', 'id,student_id,course_id,cohort_id,status,source,starts_at,ends_at,created_at,updated_at')
   const cohorts = await selectAll('cohorts', 'id,course_id,title,status,created_at')
   const courses = await selectAll('courses', 'id,title,level_code,status,created_at,updated_at')
-  const modules = await selectAll('course_modules', 'id,course_id,ordinal,title,status')
-  const audit = await selectAll('audit_log', 'id,actor_user_id,actor_kind,action,object_type,object_id,reason,created_at', 'created_at', false, 20)
-  return { users, enrollments, cohorts, courses, modules, audit }
+  const modules = await selectAll('course_modules', 'id,course_id,ordinal,title,learning_outcome,status', 'ordinal')
+  const sections = await selectAll('module_sections', 'id,module_id,legacy_key,ordinal,title,duration_label,status', 'ordinal')
+  const activities = await selectAll('activities', 'id,section_id,legacy_key,ordinal,type,title,skill,payload,grading,teacher_review_required,status', 'ordinal')
+  const audit = await selectAll('audit_log', 'id,actor_user_id,actor_kind,action,object_type,object_id,reason,created_at', 'created_at', false, 30)
+  return { users, enrollments, cohorts, courses, modules, sections, activities, audit, attempts: [], submissions: [], reviews: [] }
 }
 
 async function selectAll(table, columns, orderColumn = null, ascending = true, limit = null) {
@@ -245,7 +248,7 @@ function routeParts() {
 }
 
 async function navigate(hash) {
-  if ('speechSynthesis' in window) speechSynthesis.cancel()
+  stopActiveMedia()
   if (state.profile?.role === 'student' && location.hash !== hash) {
     const saved = await flushPendingSaves()
     if (!saved) return false
@@ -301,7 +304,7 @@ function primaryNav(role, current) {
         ['Чтение', '', false, false],
         ['Словарь', '', false, false],
         ['Повторение', '', false, false],
-        ['Встречи', '', false, false],
+        ['Расписание', '', false, false],
         ['Мой профиль', '', false, false]
       ]
     : role === 'teacher'
@@ -628,15 +631,15 @@ function renderStudentSection(sectionId) {
 }
 
 function activityReviewLabel(activity) {
-  const mode = activity?.grading?.mode
-  if (activity?.teacher_review_required || mode === 'teacher_review') return 'Проверит преподаватель'
+  const mode = задание?.grading?.mode
+  if (задание?.teacher_review_required || mode === 'teacher_review') return 'Проверит преподаватель'
   if (mode === 'auto') return 'Проверяется автоматически'
   if (mode === 'model_answer' || mode === 'acknowledge') return 'Сверь с образцом'
   return 'Самопроверка'
 }
 
 function activitySaveLabel(activity) {
-  return activity?.teacher_review_required || activity?.grading?.mode === 'teacher_review'
+  return задание?.teacher_review_required || задание?.grading?.mode === 'teacher_review'
     ? 'Сохранить черновик'
     : 'Сохранить'
 }
@@ -684,8 +687,8 @@ function renderStudentActivity(activity) {
   }
 
   const value = state.pendingDrafts.has(activity.id) ? state.pendingDrafts.get(activity.id) : (attempt?.answer?.text || '')
-  const listening = activity.type === 'listening_text' ? `<div class="audio-panel"><div><h3>Голосовое сообщение</h3></div><div class="activity-actions"><button class="btn secondary" data-play-speech="${esc(activity.id)}">▶ Прослушать</button><button class="btn text" data-stop-speech>Остановить</button></div><details class="support"><summary>Показать транскрипт</summary><p lang="de">${esc(p.transcript || p.speech_text || '')}</p></details></div>` : ''
-  const speaking = activity.type === 'speaking_reflection' ? `<div class="record-panel"><div class="activity-actions"><button class="btn secondary" data-start-record="${esc(activity.id)}">● Записать голос</button><button class="btn text" data-stop-record="${esc(activity.id)}" disabled>Остановить</button></div><p class="small muted" data-record-status="${esc(activity.id)}">Запись остаётся только на этой странице и преподавателю не отправляется.</p><div data-record-result="${esc(activity.id)}"></div></div>` : ''
+  const listening = activity.type === 'listening_text' ? `<div class="audio-panel"><div><h3>Голосовое сообщение</h3></div><div class="activity-actions"><button class="btn secondary" data-play-speech="${esc(activity.id)}">▶ Прослушать</button></div><details class="support"><summary>Показать транскрипт</summary><p lang="de">${esc(p.transcript || p.speech_text || '')}</p></details></div>` : ''
+  const speaking = activity.type === 'speaking_reflection' ? `<div class="record-panel"><div class="activity-actions"><button class="btn secondary" data-record-toggle="${esc(activity.id)}" aria-pressed="false"><span aria-hidden="true">🎙</span> Записать</button><span class="small muted" role="status" aria-live="polite" data-record-live="${esc(activity.id)}"></span></div><p class="small muted">Запись остаётся только на этой странице и преподавателю не отправляется.</p><div data-record-result="${esc(activity.id)}"></div></div>` : ''
   const project = activity.id.endsWith(':project') ? projectSubmissionBlock(activity) : ''
   if (activity.id.endsWith(':revision')) return renderRevisionActivity(activity)
 
@@ -993,7 +996,7 @@ function teacherCohortCard(cohort) {
 function teacherSubmissionRow(submission) {
   const student = state.data.students.find(x => x.id === submission.student_id)
   const activity = state.data.activities.find(x => x.id === submission.activity_id)
-  return `<button class="queue-row" data-nav="#/teacher/submission/${esc(submission.id)}"><div><strong>${esc(student?.display_name || student?.email || 'Ученик')}</strong><span>${esc(activity?.title || submission.activity_id)}</span></div><div><span class="status-pill">${esc(submissionLabel(submission.status))}</span><small>${formatDate(submission.submitted_at || submission.created_at)}</small></div><span class="arrow">→</span></button>`
+  return `<button class="queue-row" data-nav="#/teacher/submission/${esc(submission.id)}"><div><strong>${esc(student?.display_name || student?.email || 'Ученик')}</strong><span>${esc(задание?.title || submission.activity_id)}</span></div><div><span class="status-pill">${esc(submissionLabel(submission.status))}</span><small>${formatDate(submission.submitted_at || submission.created_at)}</small></div><span class="arrow">→</span></button>`
 }
 
 function renderTeacherCohort(cohortId) {
@@ -1016,8 +1019,8 @@ function renderTeacherSubmission(submissionId) {
   const student = state.data.students.find(x => x.id === submission.student_id)
   const activity = state.data.activities.find(x => x.id === submission.activity_id)
   const existing = state.data.reviews.find(x => x.submission_id === submission.id && x.status === 'published')
-  const requirement = activity?.payload?.word_target ? `${esc(activity.payload.word_target)} Wörter` : '40–60 Wörter'
-  const task = activity?.payload?.instruction || 'Подтверди договорённость: причина изменения, новое время, место и просьба ответить.'
+  const requirement = задание?.payload?.word_target ? `${esc(activity.payload.word_target)} Wörter` : '40–60 Wörter'
+  const task = задание?.payload?.instruction || 'Подтверди договорённость: причина изменения, новое время, место и просьба ответить.'
   const rubricFields = [
     ['task', 'Задача выполнена'],
     ['agreement', 'Договорённость понятна'],
@@ -1105,20 +1108,330 @@ async function publishTeacherReview(submissionId, decision) {
   renderRoute()
 }
 
-function renderAdminRoute() {
+function adminStatusLabel(status) {
+  return ({ active: 'Активен', blocked: 'Заблокирован', invited: 'Приглашён' }[status] || status)
+}
+
+function adminAuditActionLabel(action) {
+  return ({
+    invite_user: 'Приглашение пользователя',
+    update_user: 'Изменение доступа',
+    create_activity: 'Создание задания',
+    edit_activity: 'Редактирование задания',
+    publish_activity: 'Публикация задания',
+    archive_activity: 'Архивация задания',
+    reorder_activity: 'Изменение порядка заданий'
+  }[action] || 'Изменение')
+}
+
+function adminAuditObjectLabel(type) {
+  return ({
+    app_user: 'Пользователь',
+    user: 'Пользователь',
+    activity: 'Задание',
+    enrollment: 'Доступ к курсу'
+  }[type] || 'Объект')
+}
+
+function activityStatusLabel(status) {
+  return ({ draft: 'Черновик', published: 'Опубликовано', archived: 'В архиве' }[status] || status)
+}
+
+function activityTypeLabel(type) {
+  return ({
+    single_choice: 'Один вариант ответа',
+    open_text: 'Открытый ответ',
+    word_order: 'Порядок слов',
+    gap_fill: 'Заполнить пропуски',
+    model: 'Образец / самопроверка',
+    listening_text: 'Аудирование',
+    speaking_reflection: 'Устная практика'
+  }[type] || type)
+}
+
+function gradingModeLabel(mode) {
+  return ({
+    auto: 'Проверяется автоматически',
+    self_review: 'Самопроверка',
+    model_answer: 'Сверка с образцом',
+    teacher_review: 'Проверяет преподаватель',
+    acknowledge: 'Самопроверка'
+  }[mode] || mode)
+}
+
+function adminPromptLabel(type) {
+  if (type === 'single_choice') return 'Вопрос'
+  if (type === 'gap_fill') return 'Текст задания'
+  return 'Задание'
+}
+
+function ruCount(value, forms) {
+  const n = Math.abs(Number(value) || 0)
+  const n10 = n % 10
+  const n100 = n % 100
+  if (n10 === 1 && n100 !== 11) return `${n} ${forms[0]}`
+  if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return `${n} ${forms[1]}`
+  return `${n} ${forms[2]}`
+}
+
+async function adminApi(body) {
+  const { data, error } = await supabase.functions.invoke('admin-control', { body })
+  if (error) {
+    let message = error.message || 'Операция не выполнена.'
+    try {
+      const payload = await error.context?.json?.()
+      if (payload?.error) message = payload.error
+    } catch {}
+    throw new Error(message)
+  }
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
+async function refreshAdminData() {
+  state.data = await loadAdminData()
+  renderRoute()
+}
+
+function renderStudentActivityPreview(activity) {
+  const original = state.data
+  state.data = { ...original, attempts: [], submissions: [], reviews: [] }
+  try {
+    return renderStudentActivity(activity)
+      .replace(/<button /g, '<button disabled ')
+      .replace(/<input /g, '<input disabled ')
+      .replace(/<textarea /g, '<textarea disabled ')
+      .replace(/ data-(save-activity|submit-project|submit-revision|play-speech|record-toggle)="[^"]*"/g, '')
+  } finally {
+    state.data = original
+  }
+}
+
+function adminPreviewCard(activity) {
+  return `<section class="admin-preview"><div class="section-heading"><h2>Предпросмотр</h2><span class="muted">Так задание увидит ученик; действия отключены</span></div><div data-admin-preview>${renderStudentActivityPreview(activity)}</div></section>`
+}
+
+function renderAdminRoute(parts) {
+  const view = parts[1] || 'home'
+  if (view === 'users') return renderAdminUsers()
+  if (view === 'content') {
+    if (parts[2] === 'module' && parts[3]) return renderAdminModule(parts.slice(3).join('/'))
+    if (parts[2] === 'activity' && parts[3]) return renderAdminActivity(parts.slice(3).join('/'))
+    if (parts[2] === 'new' && parts[3]) return renderAdminNewActivity(parts.slice(3).join('/'))
+    return renderAdminCatalog()
+  }
   renderAdminHome()
 }
 
 function renderAdminHome() {
   const activeStudents = state.data.users.filter(x => x.role === 'student' && x.status === 'active').length
   const activeEnrollments = state.data.enrollments.filter(x => x.status === 'active').length
-  const content = `<div class="eyebrow">СЛУЖЕБНАЯ ПАНЕЛЬ</div><h1>Состояние платформы</h1><p class="lead muted">Только контроль и обзор. Операционные изменения должны выполняться через ограниченный API и подтверждаемые действия.</p>
-    <div class="metric-grid"><div class="metric-card"><strong>${activeStudents}</strong><span>активных учеников</span></div><div class="metric-card"><strong>${activeEnrollments}</strong><span>активных доступов</span></div><div class="metric-card"><strong>${state.data.cohorts.length}</strong><span>групп</span></div><div class="metric-card"><strong>${state.data.modules.length}</strong><span>модулей</span></div></div>
-    <div class="section-heading spaced"><h2>Пользователи и роли</h2></div><div class="admin-table">${state.data.users.map(user => `<div class="admin-row"><div><strong>${esc(user.display_name || user.email || 'Пользователь')}</strong><span class="muted">${esc(user.email || '')}</span></div><span class="status-pill">${esc(roleLabel(user.role))}</span><span>${esc(user.status)}</span></div>`).join('')}</div>
-    <div class="section-heading spaced"><h2>Последние события аудита</h2></div>${state.data.audit.length ? `<div class="admin-table">${state.data.audit.map(item => `<div class="admin-row"><div><strong>${esc(item.action)}</strong><span class="muted">${esc(item.object_type)} · ${esc(item.object_id)}</span></div><span>${formatDate(item.created_at)}</span></div>`).join('')}</div>` : emptyState('Аудит пока пуст', 'Служебные операции будут записываться здесь по мере подключения API/агентов.')}`
-  const aside = '<section class="rail-card"><span class="rail-label">ПРИНЦИП</span><h3>Не большой админ-кабинет</h3><p>Человеку показываем только контроль, подтверждение и исключения. Массовые операции — через API и агентов.</p></section>'
+  const draftCount = state.data.activities.filter(x => x.status === 'draft').length
+  const content = `<div class="eyebrow">СЛУЖЕБНАЯ ПАНЕЛЬ</div><h1>Состояние платформы</h1><p class="lead muted">Минимальный набор операций: доступы и учебный контент. Остальные действия пока остаются вне интерфейса.</p>
+    <div class="metric-grid"><div class="metric-card"><strong>${activeStudents}</strong><span>активных учеников</span></div><div class="metric-card"><strong>${activeEnrollments}</strong><span>активных доступов</span></div><div class="metric-card"><strong>${state.data.modules.length}</strong><span>модулей</span></div><div class="metric-card"><strong>${draftCount}</strong><span>черновиков заданий</span></div></div>
+    <div class="admin-action-grid">
+      <button class="card admin-action-card" data-nav="#/admin/users"><span class="eyebrow">ДОСТУП</span><h2>Ученики и доступ</h2><p>Создание пользователя, роль и статус.</p><span class="card-link">Открыть →</span></button>
+      <button class="card admin-action-card" data-nav="#/admin/content"><span class="eyebrow">КОНТЕНТ</span><h2>Каталог материалов</h2><p>Курс → модуль → раздел → задание.</p><span class="card-link">Открыть →</span></button>
+    </div>
+    <div class="section-heading spaced"><h2>Последние изменения</h2></div>${state.data.audit.length ? `<div class="admin-table">${state.data.audit.slice(0,10).map(item => `<div class="admin-row"><div><strong>${esc(adminAuditActionLabel(item.action))}</strong><span class="muted">${esc(adminAuditObjectLabel(item.object_type))}</span></div><span>${esc(item.reason || '')}</span><span>${formatDate(item.created_at)}</span></div>`).join('')}</div>` : emptyState('Изменений пока нет', 'Операционные действия появятся здесь после изменений.')}`
+  const aside = '<section class="rail-card"><span class="rail-label">ПРИНЦИП</span><h3>Минимальный контроль</h3><p>Без большого административного кабинета: только операции, где человеку действительно нужны выбор и подтверждение.</p></section>'
   app.innerHTML = shell('admin', content, aside)
 }
+
+function renderAdminUsers() {
+  const rows = state.data.users.map(user => `<form class="admin-user-row" data-admin-user-form="${esc(user.id)}">
+      <div class="admin-user-main"><strong>${esc(user.display_name || user.email || 'Пользователь')}</strong><span class="muted">${esc(user.email || '')}</span><span class="small muted">Создан: ${formatDate(user.created_at)}</span></div>
+      <label class="compact-field"><span>Роль</span><select name="role">
+        ${['student','teacher','admin'].map(role => `<option value="${role}" ${role === user.role ? 'selected' : ''}>${esc(roleLabel(role))}</option>`).join('')}
+      </select></label>
+      <label class="compact-field"><span>Статус</span><select name="status">
+        <option value="active" ${user.status === 'active' ? 'selected' : ''}>Активен</option>
+        <option value="blocked" ${user.status === 'blocked' ? 'selected' : ''}>Заблокирован</option>
+      </select></label>
+      <button class="btn secondary compact" type="submit">Сохранить</button>
+      <span class="small muted" data-admin-user-status="${esc(user.id)}"></span>
+    </form>`).join('')
+
+  const content = `<div class="breadcrumbs"><button data-nav="#/admin/home">Обзор</button><span>›</span><span>Ученики и доступ</span></div>
+    <div class="section-heading"><div><div class="eyebrow">ПОЛЬЗОВАТЕЛИ И РОЛИ</div><h1>Ученики и доступ</h1></div></div>
+    <details class="card disclosure admin-create"><summary>Создать / пригласить пользователя</summary>
+      <form id="admin-invite-form" class="admin-form-grid">
+        <label class="field"><span>Email</span><input name="email" type="email" required autocomplete="off"></label>
+        <label class="field"><span>Имя</span><input name="display_name" required autocomplete="off"></label>
+        <label class="field"><span>Роль</span><select name="role"><option value="student">Ученик</option><option value="teacher">Преподаватель</option><option value="admin">Администратор</option></select></label>
+        <div class="admin-form-actions"><button class="btn" type="submit">Отправить приглашение</button><span class="small muted" data-admin-form-status></span></div>
+      </form>
+    </details>
+    <section class="card"><div class="section-heading"><h2>Пользователи</h2><span class="muted">${state.data.users.length}</span></div><div class="admin-user-list">${rows || emptyState('Пользователей пока нет', '')}</div></section>`
+  app.innerHTML = shell('admin', content)
+}
+
+function renderAdminCatalog() {
+  const cards = state.data.courses.map(course => {
+    const modules = state.data.modules.filter(module => module.course_id === course.id)
+    return `<section class="card admin-course-card"><div><span class="badge">${esc(course.level_code || course.id)}</span><h2>${esc(course.title)}</h2><p class="muted">Статус: ${esc(activityStatusLabel(course.status))}</p></div><div class="admin-module-links">${modules.map(module => `<button class="module-card" data-nav="#/admin/content/module/${esc(module.id)}"><span class="module-number">${String(module.ordinal).padStart(2,'0')}</span><div><strong>${esc(module.title)}</strong><span class="muted">${state.data.sections.filter(section => section.module_id === module.id).length} разделов</span></div><span class="arrow">→</span></button>`).join('')}</div></section>`
+  }).join('')
+  const content = `<div class="breadcrumbs"><button data-nav="#/admin/home">Обзор</button><span>›</span><span>Каталог материалов</span></div><div class="eyebrow">МАТЕРИАЛЫ</div><h1>Каталог материалов</h1><p class="lead muted">Выберите модуль. Контент не раскрывается одной длинной страницей.</p>${cards || emptyState('Каталог пуст', 'Курсы появятся после добавления в модель данных.')}`
+  app.innerHTML = shell('admin', content)
+}
+
+function renderAdminModule(moduleId) {
+  const module = state.data.modules.find(item => item.id === moduleId)
+  if (!module) return navigate('#/admin/content')
+  const course = state.data.courses.find(item => item.id === module.course_id)
+  const sections = state.data.sections.filter(item => item.module_id === module.id).sort((a,b) => a.ordinal - b.ordinal)
+  const sectionBlocks = sections.map(section => {
+    const activities = state.data.activities.filter(item => item.section_id === section.id).sort((a,b) => a.ordinal - b.ordinal)
+    return `<details class="card disclosure admin-section"><summary><span><strong>${section.ordinal}. ${esc(section.title)}</strong><small>${activities.length} заданий</small></span></summary>
+      <div class="admin-activity-list">${activities.map((activity, index) => `<div class="admin-activity-row">
+        <span class="activity-order">${activity.ordinal}</span>
+        <div><strong>${esc(activity.title)}</strong><span class="muted">${esc(activityTypeLabel(activity.type))}</span></div>
+        <span class="status-pill ${activity.status === 'archived' ? 'muted-status' : ''}">${esc(activityStatusLabel(activity.status))}</span>
+        <div class="admin-order-actions"><button class="btn text compact" type="button" data-admin-activity-action="reorder_activity" data-direction="up" data-activity-id="${esc(activity.id)}" ${index === 0 || activity.status === 'archived' ? 'disabled' : ''}>↑</button><button class="btn text compact" type="button" data-admin-activity-action="reorder_activity" data-direction="down" data-activity-id="${esc(activity.id)}" ${index === activities.length - 1 || activity.status === 'archived' ? 'disabled' : ''}>↓</button></div>
+        <button class="btn secondary compact" data-nav="#/admin/content/activity/${esc(activity.id)}">Открыть</button>
+      </div>`).join('') || '<p class="muted">В разделе пока нет заданий.</p>'}</div>
+      <button class="inline-link admin-add-link" data-nav="#/admin/content/new/${esc(section.id)}">+ Добавить задание</button>
+    </details>`
+  }).join('')
+  const content = `<div class="breadcrumbs"><button data-nav="#/admin/content">Каталог</button><span>›</span><span>${esc(course?.title || module.course_id)}</span><span>›</span><span>${esc(module.title)}</span></div>
+    <div class="eyebrow">${esc(module.course_id)} · МОДУЛЬ ${String(module.ordinal).padStart(2,'0')}</div><h1>${esc(module.title)}</h1><p class="lead muted">${esc(module.learning_outcome || '')}</p>
+    <div class="admin-section-stack">${sectionBlocks}</div>`
+  app.innerHTML = shell('admin', content)
+}
+
+function adminEditableFields(activity) {
+  const p = activity.payload || {}
+  const common = ['instruction','prompt','support','placeholder']
+  const optional = ['explanation','system_note','input_label','feedback_correct','feedback_incorrect'].filter(key => Object.hasOwn(p, key))
+  const labels = {
+    instruction: 'Инструкция',
+    prompt: adminPromptLabel(activity.type),
+    support: 'Подсказка',
+    placeholder: 'Подсказка в поле ответа',
+    explanation: 'Объяснение ответа',
+    system_note: 'Системное пояснение',
+    input_label: 'Подпись поля ответа',
+    feedback_correct: 'Обратная связь при верном ответе',
+    feedback_incorrect: 'Обратная связь при неверном ответе'
+  }
+  return [...common, ...optional].map(key => `<label class="field"><span>${labels[key]}</span><textarea name="${key}" rows="2">${esc(p[key] || '')}</textarea></label>`).join('')
+}
+
+function renderAdminActivity(activityId) {
+  const activity = state.data.activities.find(item => item.id === activityId)
+  if (!activity) return navigate('#/admin/content')
+  const section = state.data.sections.find(item => item.id === activity.section_id)
+  const module = state.data.modules.find(item => item.id === section?.module_id)
+  const locked = activity.status !== 'draft'
+  const editor = locked
+    ? `<div class="notice"><strong>${activity.status === 'published' ? 'Опубликованное задание защищено от прямого редактирования.' : 'Задание находится в архиве.'}</strong><br>${activity.status === 'published' ? 'Чтобы не менять задание у текущих учеников, редактировать можно только черновик.' : 'История попыток и отправленных работ сохраняется.'}</div>`
+    : `<form id="admin-activity-edit-form" data-admin-editor data-activity-id="${esc(activity.id)}">
+        <label class="field"><span>Название</span><input name="title" value="${esc(activity.title)}" required></label>
+        <div class="admin-meta-line"><span><strong>Тип задания:</strong> ${esc(activityTypeLabel(activity.type))}</span><span><strong>Проверка:</strong> ${esc(gradingModeLabel(activity.grading?.mode || ''))}</span></div>
+        ${adminEditableFields(activity)}
+        <div class="admin-form-actions"><button class="btn" type="submit">Сохранить черновик</button><span class="small muted" data-admin-form-status></span></div>
+      </form>`
+  const lifecycle = `<div class="admin-lifecycle">
+      ${activity.status === 'draft' ? `<button class="btn" type="button" data-admin-activity-action="publish_activity" data-activity-id="${esc(activity.id)}">Опубликовать</button>` : ''}
+      ${activity.status !== 'archived' ? `<button class="btn secondary" type="button" data-admin-activity-action="archive_activity" data-activity-id="${esc(activity.id)}">Архивировать</button>` : ''}
+    </div>`
+  const content = `<div class="breadcrumbs"><button data-nav="#/admin/content">Каталог</button><span>›</span><button data-nav="#/admin/content/module/${esc(module?.id || '')}">${esc(module?.title || 'Модуль')}</button><span>›</span><span>${esc(activity.title)}</span></div>
+    <div class="section-heading"><div><div class="eyebrow">${esc(activityTypeLabel(activity.type))}</div><h1>${esc(activity.title)}</h1></div><span class="status-pill">${esc(activityStatusLabel(activity.status))}</span></div>
+    <section class="card admin-editor-card">${editor}${lifecycle}</section>
+    ${adminPreviewCard(activity)}`
+  app.innerHTML = shell('admin', content)
+}
+
+function adminNewTypeFields(type) {
+  if (type === 'single_choice') return `<label class="field"><span>Варианты — по одному на строку</span><textarea name="options" required></textarea></label><label class="field"><span>Номер правильного варианта (с 1)</span><input name="correct_index_ui" type="number" min="1" value="1" required></label>`
+  if (type === 'word_order') return `<label class="field"><span>Слова / части фразы — по одному на строку</span><textarea name="tokens" required></textarea></label><label class="field"><span>Правильный порядок (например 1,2,3)</span><input name="expected_order_ui" value="1,2,3" required></label>`
+  if (type === 'gap_fill') return `<label class="field"><span>Допустимые ответы — по одному на строку</span><textarea name="answers" required></textarea></label>`
+  if (type === 'model') return `<label class="field"><span>Примеры — по одному на строку</span><textarea name="examples" required></textarea></label>`
+  return `<label class="field"><span>Проверка</span><select name="grading_mode"><option value="self_review">Самопроверка</option><option value="model_answer">Сверка с образцом</option><option value="teacher_review">Проверяет преподаватель</option></select></label>`
+}
+
+function nextActivityOrdinal(sectionId) {
+  const values = state.data.activities.filter(item => item.section_id === sectionId).map(item => Number(item.ordinal) || 0)
+  return (values.length ? Math.max(...values) : 0) + 1
+}
+
+function renderAdminNewActivity(sectionId) {
+  const section = state.data.sections.find(item => item.id === sectionId)
+  if (!section) return navigate('#/admin/content')
+  const module = state.data.modules.find(item => item.id === section.module_id)
+  const content = `<div class="breadcrumbs"><button data-nav="#/admin/content">Каталог</button><span>›</span><button data-nav="#/admin/content/module/${esc(module?.id || '')}">${esc(module?.title || 'Модуль')}</button><span>›</span><span>Новое задание</span></div>
+    <div class="eyebrow">ЧЕРНОВИК</div><h1>Новое задание</h1><p class="lead muted">${esc(section.title)} · новое задание создаётся как черновик.</p>
+    <section class="card admin-editor-card"><form id="admin-activity-create-form" data-admin-new-editor data-section-id="${esc(section.id)}">
+      <div class="admin-form-grid two">
+        <label class="field"><span>Тип задания</span><select name="type" data-admin-type><option value="open_text">Открытый ответ</option><option value="single_choice">Один вариант ответа</option><option value="word_order">Порядок слов</option><option value="gap_fill">Заполнить пропуски</option><option value="model">Образец / самопроверка</option></select></label>
+        <label class="field"><span>Порядок в разделе</span><input name="ordinal" type="number" min="1" value="${nextActivityOrdinal(section.id)}" required></label>
+      </div>
+      <label class="field"><span>Название</span><input name="title" required></label>
+      <label class="field"><span>Инструкция</span><textarea name="instruction" required></textarea></label>
+      <label class="field"><span>Задание</span><textarea name="prompt"></textarea></label>
+      <label class="field"><span>Подсказка</span><textarea name="support"></textarea></label>
+      <label class="field"><span>Подсказка в поле ответа</span><textarea name="placeholder" rows="2"></textarea></label>
+      <div data-admin-type-fields>${adminNewTypeFields('open_text')}</div>
+      <div class="admin-form-actions"><button class="btn" type="submit">Создать черновик</button><span class="small muted" data-admin-form-status></span></div>
+    </form></section>
+    <section class="admin-preview"><div class="section-heading"><h2>Предпросмотр</h2><span class="muted">Обновляется по мере заполнения</span></div><div data-admin-preview>${renderStudentActivityPreview({ id: 'preview:new', section_id: section.id, ordinal: nextActivityOrdinal(section.id), type: 'open_text', title: 'Новое задание', payload: { instruction: 'Инструкция' }, grading: { mode: 'self_review' }, teacher_review_required: false, status: 'draft' })}</div></section>`
+  app.innerHTML = shell('admin', content)
+}
+
+function adminActivityFromForm(form) {
+  const fd = new FormData(form)
+  const type = String(fd.get('type') || 'open_text')
+  const payload = {
+    instruction: String(fd.get('instruction') || ''),
+    prompt: String(fd.get('prompt') || ''),
+    support: String(fd.get('support') || ''),
+    placeholder: String(fd.get('placeholder') || '')
+  }
+  let grading = { mode: String(fd.get('grading_mode') || 'self_review') }
+  if (type === 'single_choice') {
+    payload.options = String(fd.get('options') || '').split(/\n/).map(x => x.trim()).filter(Boolean)
+    grading = { mode: 'auto', correct_index: Math.max(0, Number(fd.get('correct_index_ui') || 1) - 1) }
+  } else if (type === 'word_order') {
+    payload.tokens = String(fd.get('tokens') || '').split(/\n/).map(x => x.trim()).filter(Boolean)
+    grading = { mode: 'auto', expected_order: String(fd.get('expected_order_ui') || '').split(',').map(x => Number(x.trim()) - 1).filter(Number.isInteger) }
+  } else if (type === 'gap_fill') {
+    grading = { mode: 'auto', answers: String(fd.get('answers') || '').split(/\n/).map(x => x.trim()).filter(Boolean) }
+  } else if (type === 'model') {
+    payload.examples = String(fd.get('examples') || '').split(/\n/).map(x => x.trim()).filter(Boolean)
+    grading = { mode: 'acknowledge' }
+  }
+  return {
+    id: 'preview:new',
+    section_id: form.dataset.sectionId || '',
+    ordinal: Number(fd.get('ordinal') || 1),
+    type,
+    title: String(fd.get('title') || 'Новое задание'),
+    payload,
+    grading,
+    teacher_review_required: grading.mode === 'teacher_review',
+    status: 'draft'
+  }
+}
+
+function updateAdminPreview(form) {
+  const preview = document.querySelector('[data-admin-preview]')
+  if (!preview) return
+  let activity
+  if (form.dataset.adminEditor !== undefined) {
+    const base = state.data.activities.find(item => item.id === form.dataset.activityId)
+    if (!base) return
+    const fd = new FormData(form)
+    const payload = { ...base.payload }
+    for (const key of ['instruction','prompt','support','placeholder','explanation','system_note','input_label','feedback_correct','feedback_incorrect']) {
+      if (fd.has(key)) payload[key] = String(fd.get(key) || '')
+    }
+    activity = { ...base, title: String(fd.get('title') || base.title), payload }
+  } else {
+    activity = adminActivityFromForm(form)
+  }
+  preview.innerHTML = renderStudentActivityPreview(activity)
+}
+
 
 function emptyState(title, text) {
   return `<div class="empty-state"><h3>${esc(title)}</h3><p>${esc(text)}</p></div>`
@@ -1148,36 +1461,53 @@ async function logout() {
   renderAuth()
 }
 
+function resetSpeechControl(activityId = state.speechActivityId) {
+  if (!activityId) return
+  const button = document.querySelector(`[data-play-speech="${cssEscape(activityId)}"]`)
+  if (button?.isConnected) button.textContent = '▶ Прослушать'
+}
+
 function playSpeech(activityId) {
   const activity = state.data.activities.find(x => x.id === activityId)
-  const text = activity?.payload?.speech_text
+  const text = задание?.payload?.speech_text
   if (!text || !('speechSynthesis' in window)) return
-  if (speechSynthesis.speaking && !speechSynthesis.paused) {
-    speechSynthesis.pause()
-    const button = document.querySelector(`[data-play-speech="${cssEscape(activityId)}"]`)
-    if (button) button.textContent = '▶ Продолжить'
-    return
-  }
-  if (speechSynthesis.paused) {
-    speechSynthesis.resume()
-    const button = document.querySelector(`[data-play-speech="${cssEscape(activityId)}"]`)
-    if (button) button.textContent = '⏸ Пауза'
-    return
-  }
-  speechSynthesis.cancel()
-  const utterance = new SpeechSynthesisUtterance(text)
   const button = document.querySelector(`[data-play-speech="${cssEscape(activityId)}"]`)
-  if (button) button.textContent = '⏸ Пауза'
-  utterance.onend = () => { if (button?.isConnected) button.textContent = '▶ Прослушать' }
+
+  if (state.speechActivityId === activityId && speechSynthesis.speaking && !speechSynthesis.paused) {
+    speechSynthesis.pause()
+    if (button) button.textContent = '▶ Прослушать'
+    return
+  }
+  if (state.speechActivityId === activityId && speechSynthesis.paused) {
+    speechSynthesis.resume()
+    if (button) button.textContent = '❚❚ Пауза'
+    return
+  }
+
+  resetSpeechControl()
+  speechSynthesis.cancel()
+  state.speechActivityId = activityId
+  const utterance = new SpeechSynthesisUtterance(text)
+  if (button) button.textContent = '❚❚ Пауза'
+  utterance.onend = utterance.onerror = () => {
+    resetSpeechControl(activityId)
+    if (state.speechActivityId === activityId) state.speechActivityId = null
+  }
   utterance.lang = 'de-DE'
   const voice = speechSynthesis.getVoices().find(v => v.lang?.toLowerCase().startsWith('de'))
   if (voice) utterance.voice = voice
   speechSynthesis.speak(utterance)
 }
 
+function setRecordControl(activityId, recording) {
+  const button = document.querySelector(`[data-record-toggle="${cssEscape(activityId)}"]`)
+  if (!button) return
+  button.setAttribute('aria-pressed', recording ? 'true' : 'false')
+  button.innerHTML = recording ? '<span aria-hidden="true">■</span> Завершить запись' : '<span aria-hidden="true">🎙</span> Записать'
+}
+
 async function startRecording(activityId) {
-  const status = document.querySelector(`[data-record-status="${cssEscape(activityId)}"]`)
-  const stop = document.querySelector(`[data-stop-record="${cssEscape(activityId)}"]`)
+  const live = document.querySelector(`[data-record-live="${cssEscape(activityId)}"]`)
   try {
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') throw new Error('Запись звука не поддерживается этим браузером.')
     if (state.recording) stopRecording(state.recording.activityId)
@@ -1191,22 +1521,32 @@ async function startRecording(activityId) {
       const result = document.querySelector(`[data-record-result="${cssEscape(activityId)}"]`)
       if (result) result.innerHTML = `<audio controls src="${url}"></audio>`
       stream.getTracks().forEach(track => track.stop())
-      if (status) status.textContent = 'Запись готова. Прослушай её и сохрани короткую заметку ниже.'
-      if (stop) stop.disabled = true
-      state.recording = null
+      if (live?.isConnected) live.textContent = 'Запись готова.'
+      setRecordControl(activityId, false)
+      if (state.recording?.activityId === activityId) state.recording = null
     }
     recorder.start()
     state.recording = { activityId, recorder, stream }
-    if (status) status.textContent = 'Идёт запись…'
-    if (stop) stop.disabled = false
+    if (live) live.textContent = 'Идёт запись…'
+    setRecordControl(activityId, true)
   } catch (error) {
-    if (status) status.textContent = error.message
+    if (live) live.textContent = error.message
+    setRecordControl(activityId, false)
   }
 }
 
 function stopRecording(activityId) {
   if (!state.recording || state.recording.activityId !== activityId) return
   if (state.recording.recorder.state !== 'inactive') state.recording.recorder.stop()
+}
+
+function stopActiveMedia() {
+  if ('speechSynthesis' in window) {
+    resetSpeechControl()
+    speechSynthesis.cancel()
+  }
+  state.speechActivityId = null
+  if (state.recording) stopRecording(state.recording.activityId)
 }
 
 app.addEventListener('pointerdown', event => {
@@ -1244,7 +1584,7 @@ app.addEventListener('click', event => {
     if (!order.includes(index)) order.push(index)
     if (hidden) hidden.value = JSON.stringify(order)
     const activity = state.data.activities.find(item => item.id === activityId)
-    const tokens = activity?.payload?.tokens || []
+    const tokens = задание?.payload?.tokens || []
     if (answer) answer.innerHTML = order.map((tokenIndex, position) => `<button class="order-built-token" type="button" data-order-remove="${position}" data-activity-id="${esc(activityId)}">${esc(tokens[tokenIndex] || '')}</button>`).join('')
     setActivitySaveState(activityId, 'pending')
     saveActivity(activityId, false).catch(showFatal)
@@ -1259,7 +1599,7 @@ app.addEventListener('click', event => {
     order.splice(Number(orderRemove.dataset.orderRemove), 1)
     if (hidden) hidden.value = JSON.stringify(order)
     const activity = state.data.activities.find(item => item.id === activityId)
-    const tokens = activity?.payload?.tokens || []
+    const tokens = задание?.payload?.tokens || []
     const answer = document.querySelector(`[data-order-answer="${cssEscape(activityId)}"]`)
     if (answer) answer.innerHTML = order.length ? order.map((tokenIndex, position) => `<button class="order-built-token" type="button" data-order-remove="${position}" data-activity-id="${esc(activityId)}">${esc(tokens[tokenIndex] || '')}</button>`).join('') : '<span class="muted">Нажимай слова по порядку.</span>'
     setActivitySaveState(activityId, 'pending')
@@ -1298,20 +1638,26 @@ app.addEventListener('click', event => {
     playSpeech(play.dataset.playSpeech)
     return
   }
-  if (event.target.closest('[data-stop-speech]')) {
-    if ('speechSynthesis' in window) speechSynthesis.cancel()
-    const playButton = document.querySelector('[data-play-speech]')
-    if (playButton) playButton.textContent = '▶ Прослушать'
+  const recordToggle = event.target.closest('[data-record-toggle]')
+  if (recordToggle) {
+    const activityId = recordToggle.dataset.recordToggle
+    if (state.recording?.activityId === activityId) stopRecording(activityId)
+    else startRecording(activityId).catch(showFatal)
     return
   }
-  const start = event.target.closest('[data-start-record]')
-  if (start) {
-    startRecording(start.dataset.startRecord).catch(showFatal)
-    return
-  }
-  const stop = event.target.closest('[data-stop-record]')
-  if (stop) {
-    stopRecording(stop.dataset.stopRecord)
+  const adminAction = event.target.closest('[data-admin-activity-action]')
+  if (adminAction && state.profile?.role === 'admin') {
+    const action = adminAction.dataset.adminActivityAction
+    const activityId = adminAction.dataset.activityId
+    if (action === 'archive_activity' && !window.confirm('Архивировать задание? Оно исчезнет из текущего маршрута ученика.')) return
+    if (action === 'publish_activity' && !window.confirm('Опубликовать задание для учеников? После публикации текст будет защищён от изменений.')) return
+    adminAction.disabled = true
+    adminApi({ action, activity_id: activityId, direction: adminAction.dataset.direction })
+      .then(refreshAdminData)
+      .catch(error => {
+        adminAction.disabled = false
+        window.alert(error.message || String(error))
+      })
     return
   }
   const review = event.target.closest('[data-review-decision]')
@@ -1332,6 +1678,11 @@ app.addEventListener('click', event => {
 })
 
 app.addEventListener('input', event => {
+  const adminForm = event.target.closest('[data-admin-editor], [data-admin-new-editor]')
+  if (adminForm && state.profile?.role === 'admin') {
+    updateAdminPreview(adminForm)
+    return
+  }
   const input = event.target.closest('[data-activity-input]')
   if (!input || state.profile?.role !== 'student') return
   const activityId = input.dataset.activityInput
@@ -1344,15 +1695,88 @@ app.addEventListener('input', event => {
   }, 650))
 })
 
+app.addEventListener('change', event => {
+  const typeSelect = event.target.closest('[data-admin-type]')
+  if (typeSelect && state.profile?.role === 'admin') {
+    const fields = document.querySelector('[data-admin-type-fields]')
+    if (fields) fields.innerHTML = adminNewTypeFields(typeSelect.value)
+    const form = typeSelect.closest('[data-admin-new-editor]')
+    if (form) updateAdminPreview(form)
+  }
+})
+
 app.addEventListener('submit', event => {
   event.preventDefault()
   const form = event.target
-  if (form instanceof HTMLFormElement && form.id === 'login-form') {
+  if (!(form instanceof HTMLFormElement)) return
+  if (form.id === 'login-form') {
     login(form).catch(showFatal)
+    return
+  }
+  if (state.profile?.role !== 'admin') return
+
+  const status = form.querySelector('[data-admin-form-status]')
+  const setStatus = text => { if (status) status.textContent = text }
+
+  if (form.id === 'admin-invite-form') {
+    const fd = new FormData(form)
+    setStatus('Отправляем приглашение…')
+    adminApi({ action: 'invite_user', email: fd.get('email'), display_name: fd.get('display_name'), role: fd.get('role') })
+      .then(refreshAdminData)
+      .catch(error => setStatus(error.message || String(error)))
+    return
+  }
+
+  if (form.dataset.adminUserForm) {
+    const fd = new FormData(form)
+    const inline = form.querySelector('[data-admin-user-status]')
+    if (inline) inline.textContent = 'Сохраняем…'
+    adminApi({ action: 'update_user', user_id: form.dataset.adminUserForm, role: fd.get('role'), status: fd.get('status') })
+      .then(refreshAdminData)
+      .catch(error => { if (inline) inline.textContent = error.message || String(error) })
+    return
+  }
+
+  if (form.id === 'admin-activity-edit-form') {
+    const fd = new FormData(form)
+    const payload = {}
+    for (const key of ['instruction','prompt','support','placeholder','explanation','system_note','input_label','feedback_correct','feedback_incorrect']) {
+      if (fd.has(key)) payload[key] = fd.get(key)
+    }
+    setStatus('Сохраняем черновик…')
+    adminApi({ action: 'edit_activity', activity_id: form.dataset.activityId, title: fd.get('title'), payload })
+      .then(refreshAdminData)
+      .catch(error => setStatus(error.message || String(error)))
+    return
+  }
+
+  if (form.id === 'admin-activity-create-form') {
+    const activity = adminActivityFromForm(form)
+    const fd = new FormData(form)
+    const body = {
+      action: 'create_activity',
+      section_id: form.dataset.sectionId,
+      type: activity.type,
+      title: activity.title,
+      ordinal: activity.ordinal,
+      payload: activity.payload,
+      grading_mode: activity.grading.mode
+    }
+    if (activity.type === 'single_choice') body.correct_index = activity.grading.correct_index
+    if (activity.type === 'word_order') body.expected_order = activity.grading.expected_order
+    if (activity.type === 'gap_fill') body.answers = activity.grading.answers
+    setStatus('Создаём черновик…')
+    adminApi(body)
+      .then(async data => {
+        state.data = await loadAdminData()
+        await navigate(`#/admin/content/activity/${data.activity.id}`)
+      })
+      .catch(error => setStatus(error.message || String(error)))
   }
 })
 
 window.addEventListener('hashchange', () => {
+  stopActiveMedia()
   if (!state.profile || !state.data) return
   if (state.profile.role !== 'student') {
     renderRoute()
@@ -1456,7 +1880,7 @@ function p1SessionCard(session, role='student') {
 }
 function renderStudentSchedule() {
   const sessions = (state.data.liveSessions || []).slice().sort((a,b)=>String(a.starts_at||'').localeCompare(String(b.starts_at||'')))
-  const content = `<div class="eyebrow">ЛИЧНОЕ РАСПИСАНИЕ</div><h1>Занятия</h1><p class="lead muted">Конкретные даты вашей группы. Два занятия внутри модуля остаются частью учебной траектории.</p><section class="card"><h2>Расписание</h2>${sessions.length ? `<div class="schedule-list">${sessions.map(x=>p1SessionCard(x,'student')).join('')}</div>` : emptyState('Занятий пока нет','Когда для вашей группы появится дата, она будет показана здесь.')}</section>`
+  const content = `<h1>Расписание</h1><p class="lead muted">Здесь появятся даты занятий вашей группы.</p><section class="card schedule-card">${sessions.length ? `<div class="schedule-list">${sessions.map(x=>p1SessionCard(x,'student')).join('')}</div>` : emptyState('Пока нет запланированных занятий','Когда появится дата, она будет показана здесь.')}</section>`
   app.innerHTML = shell('student', content)
 }
 function renderTeacherSchedule() {
@@ -1471,7 +1895,7 @@ renderTeacherRoute = function (parts) { if ((parts[1] || 'home') === 'schedule')
 
 primaryNav = function (role, current) {
   const courseActive = current.startsWith('#/student/courses') || current.startsWith('#/student/course') || current.startsWith('#/student/module') || current.startsWith('#/student/section')
-  const items = role === 'student' ? [['Личный кабинет','#/student/home',true,current==='#/student/home'],['Мои курсы','#/student/courses',true,courseActive],['Чтение','',false,false],['Словарь','',false,false],['Повторение','',false,false],['Встречи','#/student/schedule',true,current==='#/student/schedule'],['Мой профиль','',false,false]] : role === 'teacher' ? [['Обзор','#/teacher/home',true,current==='#/teacher/home'],['Материалы A2.1','#/teacher/module/A2.1-M01',true,current.startsWith('#/teacher/module')],['Мои ученики','#/teacher/students',true,current.startsWith('#/teacher/cohort')||current.startsWith('#/teacher/students')],['Расписание','#/teacher/schedule',true,current==='#/teacher/schedule']] : [['Обзор','#/admin/home',true,true],['Ученики и доступ','',false,false],['Расписание групп','',false,false],['Каталог материалов','',false,false],['Журнал изменений','',false,false]]
+  const items = role === 'student' ? [['Личный кабинет','#/student/home',true,current==='#/student/home'],['Мои курсы','#/student/courses',true,courseActive],['Чтение','',false,false],['Словарь','',false,false],['Повторение','',false,false],['Расписание','#/student/schedule',true,current==='#/student/schedule'],['Мой профиль','',false,false]] : role === 'teacher' ? [['Обзор','#/teacher/home',true,current==='#/teacher/home'],['Материалы A2.1','#/teacher/module/A2.1-M01',true,current.startsWith('#/teacher/module')],['Мои ученики','#/teacher/students',true,current.startsWith('#/teacher/cohort')||current.startsWith('#/teacher/students')],['Расписание','#/teacher/schedule',true,current==='#/teacher/schedule']] : [['Обзор','#/admin/home',true,current==='#/admin/home'],['Ученики и доступ','#/admin/users',true,current.startsWith('#/admin/users')],['Расписание групп','',false,false],['Каталог материалов','#/admin/content',true,current.startsWith('#/admin/content')],['Журнал изменений','',false,false]]
   return items.map(([label,href,enabled,active]) => enabled ? `<button class="navlink ${active?'active':''}" data-nav="${href}" ${active?'aria-current="page"':''}><span>${esc(label)}</span></button>` : `<button class="navlink disabled" type="button" disabled aria-disabled="true"><span>${esc(label)}</span><small>позже</small></button>`).join('')
 }
 
@@ -1493,7 +1917,12 @@ renderStudentHome = function () {
 }
 function p1TrajectorySession(n) {
   const t = state.data.moduleSessionTemplates?.find(x=>x.module_id===MODULE_ID&&x.ordinal===n)
-  return `<article class="trajectory-session"><div><span class="badge">Занятие ${n}</span><h3>${esc(t?.title || `Занятие ${n}`)}</h3><p class="muted">Часть модуля · ${Number(t?.duration_minutes || 90)} минут</p></div><span class="trajectory-session-note">Дата — в личном расписании</span></article>`
+  const session = (state.data.liveSessions || []).filter(x => x.module_id === MODULE_ID && x.ordinal === n && x.status === 'planned' && x.starts_at).sort((a,b)=>new Date(a.starts_at)-new Date(b.starts_at))[0]
+  const duration = Number(t?.duration_minutes || session?.duration_minutes || 90)
+  const action = session
+    ? `${esc(new Intl.DateTimeFormat('ru-RU',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}).format(new Date(session.starts_at)))} →`
+    : 'Расписание →'
+  return `<article class="trajectory-session"><div class="trajectory-session-main"><h3>Занятие ${n} · ${duration} минут</h3><p class="muted">Занятие с преподавателем</p></div><button class="inline-link trajectory-session-action" data-nav="#/student/schedule">${action}</button></article>`
 }
 const p1StudentModuleBase = renderStudentModule
 renderStudentModule = function (moduleId) {
@@ -1526,8 +1955,24 @@ renderTeacherHome = function () {
   const content=document.querySelector('.content-column')||document.querySelector('.main-view'); if(!content)return
   const sessions=(state.data.liveSessions||[]).filter(x=>x.status==='planned'&&x.starts_at&&new Date(x.starts_at)>=new Date()).sort((a,b)=>new Date(a.starts_at)-new Date(b.starts_at))
   const signals=p1Signals(), before=content.querySelector('.section-heading')
-  if(before) before.insertAdjacentHTML('beforebegin',`<section class="teacher-action-grid"><div class="card"><div class="section-heading"><h2>Ближайшие занятия</h2><button class="inline-link" data-nav="#/teacher/schedule">Расписание →</button></div>${sessions.length?`<div class="schedule-list">${sessions.slice(0,3).map(x=>p1SessionCard(x,'teacher')).join('')}</div>`:emptyState('Занятий пока нет','Даты появятся после создания scheduled session.')}</div><div class="card"><div class="section-heading"><h2>Требуют внимания</h2></div>${signals.length?`<div class="signal-list">${signals.slice(0,5).map(x=>`<div class="signal-row"><strong>${esc(x.student.display_name||x.student.email||'Ученик')}</strong><span>${esc(x.text)}</span></div>`).join('')}</div>`:'<p class="muted">Критичных сигналов сейчас нет.</p>'}</div></section>`)
+  if(before) before.insertAdjacentHTML('beforebegin',`<section class="teacher-action-grid"><div class="card"><div class="section-heading"><h2>Ближайшие занятия</h2><button class="inline-link" data-nav="#/teacher/schedule">Расписание →</button></div>${sessions.length?`<div class="schedule-list">${sessions.slice(0,3).map(x=>p1SessionCard(x,'teacher')).join('')}</div>`:emptyState('Занятий пока нет','Даты появятся после назначения расписания.')}</div><div class="card"><div class="section-heading"><h2>Требуют внимания</h2></div>${signals.length?`<div class="signal-list">${signals.slice(0,5).map(x=>`<div class="signal-row"><strong>${esc(x.student.display_name||x.student.email||'Ученик')}</strong><span>${esc(x.text)}</span></div>`).join('')}</div>`:'<p class="muted">Критичных сигналов сейчас нет.</p>'}</div></section>`)
 }
+function teacherSectionProgress(progress) {
+  const states = progress?.section_states || {}
+  return state.data.sections.filter(x=>x.module_id===MODULE_ID).sort((a,b)=>a.ordinal-b.ordinal).map(section => {
+    const item = states[section.id] || states[section.legacy_key] || {}
+    const done = Number(item.done || 0)
+    const total = Number(item.total || state.data.activities.filter(activity => activity.section_id === section.id && activity.status !== 'archived').length)
+    const label = ({
+      completed: 'завершено',
+      in_progress: 'в работе',
+      waiting: 'ожидает открытия',
+      not_started: 'не начато'
+    }[item.status] || (total > 0 && done >= total ? 'завершено' : progress?.current_section_id === section.id ? 'в работе' : done > 0 ? 'начато' : 'не начато'))
+    return { title: section.title, label }
+  })
+}
+
 const p1TeacherCohortBase = renderTeacherCohort
 renderTeacherCohort = function (cohortId) {
   p1TeacherCohortBase(cohortId)
@@ -1535,7 +1980,11 @@ renderTeacherCohort = function (cohortId) {
   const links=state.data.cohortStudents.filter(x=>x.cohort_id===cohort.id)
   list.innerHTML=links.map(link=>{
     const student=state.data.students.find(x=>x.id===link.student_id), p=state.data.progress.find(x=>x.student_id===link.student_id&&x.module_id===MODULE_ID), section=state.data.sections.find(x=>x.id===p?.current_section_id), pending=state.data.submissions.filter(x=>x.student_id===link.student_id&&['submitted','in_review'].includes(x.status)), last=p1LatestActivity(link.student_id)
-    return `<article class="student-action-row"><div class="student-action-main"><strong>${esc(student?.display_name||student?.email||'Ученик')}</strong><span class="muted">${esc(student?.email||'')}</span></div><div><span class="row-label">Где остановился</span><strong>${esc(section?.title||'Модуль не начат')}</strong></div><div><span class="row-label">Реакция</span>${pending.length?`<span class="status-pill warn">${pending.length} ждёт проверки</span>`:'<span class="muted">Не требуется</span>'}</div><div><span class="row-label">Последняя активность</span><span>${last?esc(formatDate(last)):'—'}</span></div><details class="student-detail"><summary>Подробнее</summary><div class="student-detail-grid"><span>Прогресс: ${Math.round(Number(p?.completion_percent||0))}%</span><span>Попыток: ${state.data.attempts.filter(x=>x.student_id===link.student_id).length}</span><span>Отправок: ${state.data.submissions.filter(x=>x.student_id===link.student_id).length}</span></div><pre class="state-json">${esc(JSON.stringify(p?.section_states||{},null,2))}</pre></details></article>`
+    const attempts = state.data.attempts.filter(x=>x.student_id===link.student_id).length
+    const submitted = state.data.submissions.filter(x=>x.student_id===link.student_id&&x.status!=='draft').length
+    const progressItems = teacherSectionProgress(p)
+    const metrics = `Прогресс ${Math.round(Number(p?.completion_percent||0))}% · ${ruCount(attempts,['попытка','попытки','попыток'])} · ${ruCount(submitted,['отправленная работа','отправленные работы','отправленных работ'])}`
+    return `<article class="student-action-row"><div class="student-action-main"><strong>${esc(student?.display_name||student?.email||'Ученик')}</strong><span class="muted">${esc(student?.email||'')}</span></div><div><span class="row-label">Текущий раздел</span><strong>${esc(section?.title||'Модуль не начат')}</strong></div><div><span class="row-label">Реакция</span>${pending.length?`<span class="status-pill warn">${pending.length} ждёт проверки</span>`:'<span class="muted">Не требуется</span>'}</div><div><span class="row-label">Последняя активность</span><span>${last?esc(formatDate(last)):'—'}</span></div><details class="student-detail"><summary>Подробнее</summary><div class="student-detail-block"><strong>Прогресс по модулю</strong><div class="student-section-progress">${progressItems.map(item=>`<div><span>${esc(item.title)}</span><span class="muted">${esc(item.label)}</span></div>`).join('')}</div><p class="small muted student-detail-metrics">${esc(metrics)}</p></div></details></article>`
   }).join('')||emptyState('В группе нет учеников','Назначение учеников выполняется через серверные операции.')
 }
 const p1TeacherModuleBase = renderTeacherModule
