@@ -124,9 +124,18 @@ function showFatal(error) {
   app.innerHTML = `<main class="shell"><section class="card"><h1>Не удалось загрузить данные</h1><div class="notice error">${esc(error?.message || error)}</div><p>Можно повторить загрузку. Если ошибка сохранится, проверьте авторизацию, RLS и доступность Supabase.</p><button class="btn" data-retry-boot>Повторить</button></section></main>`
 }
 
-async function boot() {
-  const { data: { user }, error } = await supabase.auth.getUser()
-  if (error && error.name !== 'AuthSessionMissingError') throw error
+async function boot(knownUser) {
+  let user = knownUser
+  if (typeof knownUser === 'undefined') {
+    const { data: { session }, error } = await supabase.auth.getSession()
+    if (error) {
+      console.warn('Session restore failed', error)
+      user = null
+    } else {
+      user = session?.user || null
+    }
+  }
+
   state.user = user || null
   state.profile = null
   state.data = null
@@ -135,6 +144,8 @@ async function boot() {
     renderAuth()
     return
   }
+
+  app.innerHTML = '<main class="auth-shell auth-state-shell"><section class="auth-panel card loading-card" role="status" aria-live="polite"><div class="auth-brand"><img class="lernstep-logo" src="./assets/lernstep-logo.svg" alt="Lernstep"></div><h2>Загружаем кабинет…</h2></section></main>'
 
   const { data: profile, error: profileError } = await supabase
     .from('app_users')
@@ -153,10 +164,11 @@ async function boot() {
   }
 
   state.profile = profile
-  app.innerHTML = '<main class="auth-shell auth-state-shell"><section class="auth-panel card loading-card" role="status" aria-live="polite"><div class="auth-brand"><img class="lernstep-logo" src="./assets/lernstep-logo.svg" alt="Lernstep"></div><h2>Загружаем данные…</h2><p class="muted">Подготавливаем ваше рабочее пространство.</p></section></main>'
+  const startedAt = performance.now()
   if (profile.role === 'student') state.data = await loadStudentData()
   if (profile.role === 'teacher') state.data = await loadTeacherData()
   if (profile.role === 'admin') state.data = await loadAdminData()
+  console.info(`Lernstep workspace loaded in ${Math.round(performance.now() - startedAt)} ms`)
 
   if (profile.role === 'student') recoverLocalDrafts()
   ensureRoleRoute()
@@ -167,64 +179,40 @@ async function boot() {
 }
 
 async function loadStudentData() {
-  const { data: enrollments, error: e1 } = await supabase.from('enrollments').select('id,student_id,course_id,cohort_id,status,starts_at,ends_at').eq('student_id', state.profile.id)
-  if (e1) throw e1
-  const activeEnrollments = (enrollments || []).filter(x => x.status === 'active')
-  const courseIds = [...new Set(activeEnrollments.map(x => x.course_id))]
-
-  const [courses, modules, cohorts] = await Promise.all([
-    courseIds.length ? selectIn('courses', 'id,title,level_code,status', 'id', courseIds) : Promise.resolve([]),
-    courseIds.length ? selectIn('course_modules', 'id,course_id,ordinal,title,learning_outcome,status', 'course_id', courseIds, 'ordinal') : Promise.resolve([]),
+  const [enrollments, visibleCourses, modules, sections, activities, attempts, progress, submissions, reviews, cohorts] = await Promise.all([
+    selectAll('enrollments', 'id,student_id,course_id,cohort_id,status,starts_at,ends_at'),
+    selectAll('courses', 'id,title,level_code,status'),
+    selectAll('course_modules', 'id,course_id,ordinal,title,learning_outcome,status', 'ordinal'),
+    selectAll('module_sections', 'id,module_id,legacy_key,ordinal,title,duration_label,status', 'ordinal'),
+    selectAll('activities', 'id,section_id,legacy_key,ordinal,type,title,skill,payload,grading,teacher_review_required,status', 'ordinal'),
+    selectAll('activity_attempts', 'id,student_id,activity_id,attempt_no,status,answer,result,started_at,submitted_at,checked_at'),
+    selectAll('learner_module_progress', 'student_id,module_id,current_section_id,section_states,completion_percent,updated_at'),
+    selectAll('submissions', 'id,student_id,activity_id,parent_submission_id,status,text_body,submitted_at,created_at'),
+    selectAll('submission_reviews', 'id,submission_id,teacher_id,status,rubric,strengths,meaning_issue,language_goal,comment,created_at,published_at'),
     selectAll('cohorts', 'id,course_id,title,status,created_at'),
   ])
-
-  const moduleIds = modules.map(x => x.id)
-  const [sections, progress] = await Promise.all([
-    moduleIds.length ? selectIn('module_sections', 'id,module_id,legacy_key,ordinal,title,duration_label,status', 'module_id', moduleIds, 'ordinal') : Promise.resolve([]),
-    moduleIds.length ? selectIn('learner_module_progress', 'student_id,module_id,current_section_id,section_states,completion_percent,updated_at', 'module_id', moduleIds) : Promise.resolve([]),
-  ])
-
-  const sectionIds = sections.map(x => x.id)
-  const activities = sectionIds.length
-    ? await selectIn('activities', 'id,section_id,legacy_key,ordinal,type,title,skill,payload,grading,teacher_review_required,status', 'section_id', sectionIds, 'ordinal')
-    : []
-  const activityIds = activities.map(x => x.id)
-
-  const [attempts, submissions] = await Promise.all([
-    activityIds.length ? selectIn('activity_attempts', 'id,student_id,activity_id,attempt_no,status,answer,result,started_at,submitted_at,checked_at', 'activity_id', activityIds) : Promise.resolve([]),
-    activityIds.length ? selectIn('submissions', 'id,student_id,activity_id,parent_submission_id,status,text_body,submitted_at,created_at', 'activity_id', activityIds) : Promise.resolve([]),
-  ])
-  const submissionIds = submissions.map(x => x.id)
-  const reviews = submissionIds.length
-    ? await selectIn('submission_reviews', 'id,submission_id,teacher_id,status,rubric,strengths,meaning_issue,language_goal,comment,created_at,published_at', 'submission_id', submissionIds)
-    : []
-
+  const activeEnrollments = enrollments.filter(x => x.status === 'active')
+  const courseIds = new Set(activeEnrollments.map(x => x.course_id))
+  const courses = visibleCourses.filter(x => courseIds.has(x.id))
   return { enrollments, activeEnrollments, courses, modules, sections, activities, attempts, progress, submissions, reviews, cohorts }
 }
 
 async function loadTeacherData() {
-  const [courses, modules, sections, activities, cohorts, cohortStudents] = await Promise.all([
+  const [courses, modules, sections, activities, cohorts, cohortStudents, visibleUsers, enrollments, progress, submissions, reviews, attempts] = await Promise.all([
     selectAll('courses', 'id,title,level_code,status'),
     selectAll('course_modules', 'id,course_id,ordinal,title,learning_outcome,status', 'ordinal'),
     selectAll('module_sections', 'id,module_id,legacy_key,ordinal,title,duration_label,status', 'ordinal'),
     selectAll('activities', 'id,section_id,legacy_key,ordinal,type,title,skill,payload,grading,teacher_review_required,status', 'ordinal'),
     selectAll('cohorts', 'id,course_id,title,status,created_at'),
     selectAll('cohort_students', 'cohort_id,student_id,joined_at'),
+    selectAll('app_users', 'id,email,display_name,role,status'),
+    selectAll('enrollments', 'id,student_id,course_id,cohort_id,status,starts_at,ends_at'),
+    selectAll('learner_module_progress', 'student_id,module_id,current_section_id,section_states,completion_percent,updated_at'),
+    selectAll('submissions', 'id,student_id,activity_id,status,text_body,submitted_at,created_at,parent_submission_id'),
+    selectAll('submission_reviews', 'id,submission_id,teacher_id,status,rubric,strengths,meaning_issue,language_goal,comment,created_at,published_at'),
+    selectAll('activity_attempts', 'id,student_id,activity_id,status,answer,result,started_at,submitted_at,checked_at'),
   ])
-
-  const studentIds = [...new Set(cohortStudents.map(x => x.student_id))]
-  const [students, enrollments, progress, submissions, attempts] = await Promise.all([
-    studentIds.length ? selectIn('app_users', 'id,email,display_name,role,status', 'id', studentIds) : Promise.resolve([]),
-    studentIds.length ? selectIn('enrollments', 'id,student_id,course_id,cohort_id,status,starts_at,ends_at', 'student_id', studentIds) : Promise.resolve([]),
-    studentIds.length ? selectIn('learner_module_progress', 'student_id,module_id,current_section_id,section_states,completion_percent,updated_at', 'student_id', studentIds) : Promise.resolve([]),
-    studentIds.length ? selectIn('submissions', 'id,student_id,activity_id,status,text_body,submitted_at,created_at,parent_submission_id', 'student_id', studentIds) : Promise.resolve([]),
-    studentIds.length ? selectIn('activity_attempts', 'id,student_id,activity_id,status,answer,result,started_at,submitted_at,checked_at', 'student_id', studentIds) : Promise.resolve([]),
-  ])
-  const submissionIds = submissions.map(x => x.id)
-  const reviews = submissionIds.length
-    ? await selectIn('submission_reviews', 'id,submission_id,teacher_id,status,rubric,strengths,meaning_issue,language_goal,comment,created_at,published_at', 'submission_id', submissionIds)
-    : []
-
+  const students = visibleUsers.filter(x => x.role === 'student')
   return { courses, modules, sections, activities, cohorts, cohortStudents, students, enrollments, progress, submissions, reviews, attempts }
 }
 
@@ -1462,12 +1450,12 @@ async function login(form) {
     button.disabled = true
     button.textContent = 'Входим…'
   }
-  const { error } = await supabase.auth.signInWithPassword({ email: fd.get('email'), password: fd.get('password') })
+  const { data, error } = await supabase.auth.signInWithPassword({ email: fd.get('email'), password: fd.get('password') })
   if (error) {
     renderAuth(error.message)
     return
   }
-  await boot()
+  await boot(data.user)
 }
 
 async function logout() {
@@ -1833,17 +1821,15 @@ supabase.auth.onAuthStateChange(event => {
 /* P1 hardening: trajectory, schedules, actionable teacher views, deferred review. */
 const p1LoadStudentDataBase = loadStudentData
 loadStudentData = async function () {
-  const data = await p1LoadStudentDataBase()
-  const cohortIds = [...new Set(data.activeEnrollments.map(x => x.cohort_id).filter(Boolean))]
-  const moduleIds = data.modules.map(x => x.id)
-  const [liveSessions, moduleSessionTemplates, reviewItems, cohortTeachers] = await Promise.all([
-    cohortIds.length ? selectIn('live_sessions', 'id,module_id,module_session_id,cohort_id,teacher_id,ordinal,starts_at,duration_minutes,meeting_url,status,rescheduled_from_session_id,cancelled_at,cancellation_reason', 'cohort_id', cohortIds, 'starts_at') : [],
-    moduleIds.length ? selectIn('module_session_templates', 'id,module_id,ordinal,title,duration_minutes,teacher_plan,status', 'module_id', moduleIds, 'ordinal') : [],
-    moduleIds.length ? selectIn('review_items', 'id,student_id,module_id,source_activity_id,skill,due_at,interval_days,status,created_at', 'module_id', moduleIds, 'due_at') : [],
-    cohortIds.length ? selectIn('cohort_teachers', 'cohort_id,teacher_id,assigned_at', 'cohort_id', cohortIds) : []
+  const [data, liveSessions, moduleSessionTemplates, reviewItems, cohortTeachers, visibleProfiles] = await Promise.all([
+    p1LoadStudentDataBase(),
+    selectAll('live_sessions', 'id,module_id,module_session_id,cohort_id,teacher_id,ordinal,starts_at,duration_minutes,meeting_url,status,rescheduled_from_session_id,cancelled_at,cancellation_reason', 'starts_at'),
+    selectAll('module_session_templates', 'id,module_id,ordinal,title,duration_minutes,teacher_plan,status', 'ordinal'),
+    selectAll('review_items', 'id,student_id,module_id,source_activity_id,skill,due_at,interval_days,status,created_at', 'due_at'),
+    selectAll('cohort_teachers', 'cohort_id,teacher_id,assigned_at'),
+    selectAll('app_users', 'id,display_name,email,role,status')
   ])
-  const teacherIds = [...new Set(cohortTeachers.map(x => x.teacher_id))]
-  const teacherProfiles = teacherIds.length ? await selectIn('app_users', 'id,display_name,email,role,status', 'id', teacherIds) : []
+  const teacherProfiles = visibleProfiles.filter(x => x.role === 'teacher')
   return { ...data, liveSessions, moduleSessionTemplates, reviewItems, cohortTeachers, teacherProfiles }
 }
 
