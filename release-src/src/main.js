@@ -676,12 +676,23 @@ function renderStudentActivity(activity) {
   const instruction = `${p.instruction ? `<p class="task-instruction" lang="de">${esc(p.instruction)}</p>` : ''}<div class="review-mode">${esc(activityReviewLabel(activity))}</div>${p.system_note && activity.type !== 'speaking_reflection' && !activity.id.endsWith(':project') ? `<p class="system-note">${esc(p.system_note)}</p>` : ''}`
   const prompt = p.prompt ? `<div class="prompt-box">${lines(p.prompt)}</div>` : ''
   const source = Array.isArray(p.source)
-    ? `<div class="chat">${p.source.map(item => `<div class="bubble"><strong>${esc(item.speaker)}</strong><br><span lang="de">${esc(item.text)}</span></div>`).join('')}</div>`
+    ? (p.source.every(item => typeof item === 'string')
+        ? `<div class="reconstruction-blocks">${p.source.map(item => `<div class="prompt-box" lang="de">${esc(item)}</div>`).join('')}</div>`
+        : `<div class="chat">${p.source.map(item => `<div class="bubble"><strong>${esc(item.speaker || '')}</strong>${item.speaker ? '<br>' : ''}<span lang="de">${esc(item.text || '')}</span></div>`).join('')}</div>`)
     : typeof p.source === 'string' && p.source ? `<div class="prompt-box" lang="de">${esc(p.source)}</div>` : ''
-  const items = Array.isArray(p.items) ? `<div class="lex-list">${p.items.map(item => `<span>${esc(item)}</span>`).join('')}</div>` : ''
+  const simpleItems = Array.isArray(p.items) && p.items.every(item => typeof item === 'string')
+    ? `<div class="lex-list">${p.items.map(item => `<span>${esc(item)}</span>`).join('')}</div>` : ''
   const supportLabel = activity.grading?.mode === 'model_answer' ? 'Сверить с образцом' : activity.grading?.mode === 'self_review' ? 'Самопроверка' : 'Опора / проверить себя'
   const support = p.support ? `<details class="support"><summary>${esc(supportLabel)}</summary><div>${lines(p.support)}</div></details>` : ''
   const explanation = p.explanation ? `<div class="notice">${esc(p.explanation)}</div>` : ''
+  const speech = p.speech_text ? `<div class="audio-panel"><div><h3>Аудирование</h3></div><div class="activity-actions"><button class="btn secondary" type="button" data-play-inline-speech="${esc(activity.id)}" data-speech-text="${esc(p.speech_text)}">▶ Прослушать</button></div></div>` : ''
+  const autoFeedback = () => attempt?.result?.correct === true
+    ? `<div class="notice success">${esc(p.feedback_correct || 'Richtig.')}</div>`
+    : attempt?.result?.correct === false
+      ? `<div class="notice error">${esc(p.feedback_incorrect || 'Noch nicht. Versuch es noch einmal.')}</div>`
+      : ''
+
+  if (activity.id.endsWith(':revision')) return renderRevisionActivity(activity)
 
   if (activity.type === 'model') {
     const examples = Array.isArray(p.examples) ? `<div class="model-examples">${p.examples.map(example => `<div class="prompt-box" lang="de">${esc(example)}</div>`).join('')}</div>` : ''
@@ -690,84 +701,68 @@ function renderStudentActivity(activity) {
 
   if (activity.type === 'single_choice') {
     const selected = attempt?.answer?.choice
-    const checked = attempt?.result?.correct
-    const options = (p.options || []).map((option, i) => `<label class="choice-option ${selected === i ? 'selected' : ''}"><input type="radio" name="activity-${esc(activity.id)}" value="${i}" ${selected === i ? 'checked' : ''}><span>${esc(option)}</span></label>`).join('')
-    const feedback = checked === true ? `<div class="notice success">${esc(p.feedback_correct || 'Верно.')}</div>` : checked === false ? `<div class="notice error">${esc(p.feedback_incorrect || 'Попробуй ещё раз.')}</div>` : ''
-    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${prompt}<div class="choice-list">${options}</div>${feedback}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
+    const options = (p.options || []).map((option, index) => `<label class="choice-option ${selected === index ? 'selected' : ''}"><input type="radio" name="activity-${esc(activity.id)}" value="${index}" ${selected === index ? 'checked' : ''}><span>${esc(option)}</span></label>`).join('')
+    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${speech}${source}${prompt}<div class="choice-list">${options}</div>${autoFeedback()}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
   }
 
-  if (activity.type === 'word_order') {
+  if (activity.type === 'word_order' || activity.type === 'sequencing') {
     const savedOrder = Array.isArray(attempt?.answer?.order) ? attempt.answer.order : []
-    const tokens = Array.isArray(p.tokens) ? p.tokens : []
+    const tokens = activity.type === 'word_order' ? (Array.isArray(p.tokens) ? p.tokens : []) : (Array.isArray(p.items) ? p.items : [])
     const selected = savedOrder.map(index => tokens[index]).filter(Boolean)
-    const buttons = tokens.map((token, index) => `<button class="order-token" type="button" data-order-token="${index}" data-activity-id="${esc(activity.id)}">${esc(token)}</button>`).join('')
-    const built = selected.map((token, position) => `<button class="order-built-token" type="button" data-order-remove="${position}" data-activity-id="${esc(activity.id)}">${esc(token)}</button>`).join('')
-    const feedback = attempt?.result?.correct === true ? `<div class="notice success">${esc(p.feedback_correct || 'Верно.')}</div>` : attempt?.result?.correct === false && savedOrder.length ? `<div class="notice error">${esc(p.feedback_incorrect || 'Проверь порядок слов.')}</div>` : ''
-    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${prompt}<div class="word-order-bank">${buttons}</div><div class="word-order-answer" data-order-answer="${esc(activity.id)}">${built || '<span class="muted">Нажимай слова по порядку.</span>'}</div><input type="hidden" data-order-input="${esc(activity.id)}" value="${esc(JSON.stringify(savedOrder))}">${feedback}<div class="activity-actions"><button class="btn secondary" type="button" data-order-reset="${esc(activity.id)}">Сбросить</button><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
+    const buttons = tokens.map((token,index) => `<button class="order-token" type="button" data-order-token="${index}" data-activity-id="${esc(activity.id)}">${esc(token)}</button>`).join('')
+    const built = selected.map((token,position) => `<button class="order-built-token" type="button" data-order-remove="${position}" data-activity-id="${esc(activity.id)}">${esc(token)}</button>`).join('')
+    const empty = activity.type === 'sequencing' ? 'Нажимай реплики по порядку.' : 'Нажимай слова по порядку.'
+    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${prompt}<div class="word-order-bank">${buttons}</div><div class="word-order-answer" data-order-answer="${esc(activity.id)}">${built || `<span class="muted">${empty}</span>`}</div><input type="hidden" data-order-input="${esc(activity.id)}" value="${esc(JSON.stringify(savedOrder))}">${autoFeedback()}<div class="activity-actions"><button class="btn secondary" type="button" data-order-reset="${esc(activity.id)}">Сбросить</button><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
   }
 
   if (activity.type === 'gap_fill') {
-    const expected = Array.isArray(activity.grading?.answers) ? activity.grading.answers : []
+    const expected = Array.isArray(activity.grading?.answers) ? activity.grading.answers : (Array.isArray(p.answers) ? p.answers : [])
     const multiple = expected.length > 1
     const savedValues = Array.isArray(attempt?.answer?.values) ? attempt.answer.values : []
-    if (activity.type === 'true_false') {
+    const value = state.pendingDrafts.has(activity.id) ? state.pendingDrafts.get(activity.id) : (attempt?.answer?.text || '')
+    const fields = multiple
+      ? expected.map((_,index) => `<label class="field compact-field"><span>Lücke ${index+1}</span><input data-gap-input="${esc(activity.id)}" data-gap-index="${index}" value="${esc(savedValues[index] || '')}" autocomplete="off"></label>`).join('')
+      : `<label class="field"><span>${esc(p.input_label || 'Вставь слово')}</span><input data-activity-input="${esc(activity.id)}" value="${esc(value)}" autocomplete="off"></label>`
+    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${prompt}<div class="structured-fields">${fields}</div>${autoFeedback()}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
+  }
+
+  if (activity.type === 'true_false') {
     const values = Array.isArray(attempt?.answer?.values) ? attempt.answer.values : []
     const statements = Array.isArray(p.statements) ? p.statements : []
-    const rows = statements.map((item, index) => `<fieldset class="structured-row"><legend>${index + 1}. ${esc(item.text)}</legend><label class="choice-option inline-choice"><input type="radio" name="tf-${esc(activity.id)}-${index}" value="true" ${values[index] === true ? 'checked' : ''}> Richtig</label><label class="choice-option inline-choice"><input type="radio" name="tf-${esc(activity.id)}-${index}" value="false" ${values[index] === false ? 'checked' : ''}> Falsch</label></fieldset>`).join('')
-    const feedback = attempt?.result?.correct === true ? '<div class="notice success">Richtig.</div>' : attempt?.result?.correct === false ? '<div class="notice error">Noch nicht. Versuch es noch einmal.</div>' : ''
-    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${source}<div class="structured-list">${rows}</div>${feedback}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
+    const rows = statements.map((item,index) => `<fieldset class="structured-row"><legend>${index+1}. ${esc(item.text)}</legend><div><label class="choice-option inline-choice"><input type="radio" name="tf-${esc(activity.id)}-${index}" value="true" ${values[index] === true ? 'checked' : ''}> Richtig</label><label class="choice-option inline-choice"><input type="radio" name="tf-${esc(activity.id)}-${index}" value="false" ${values[index] === false ? 'checked' : ''}> Falsch</label></div></fieldset>`).join('')
+    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${speech}${source}<div class="structured-list">${rows}</div>${autoFeedback()}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
   }
 
   if (activity.type === 'multiple_choice') {
     const choices = Array.isArray(attempt?.answer?.choices) ? attempt.answer.choices : []
-    const options = (p.options || []).map((option, index) => `<label class="choice-option ${choices.includes(index) ? 'selected' : ''}"><input type="checkbox" data-multi-choice="${esc(activity.id)}" value="${index}" ${choices.includes(index) ? 'checked' : ''}><span>${esc(option)}</span></label>`).join('')
-    const speech = p.speech_text ? `<div class="audio-panel"><div><h3>Аудирование</h3></div><div class="activity-actions"><button class="btn secondary" data-play-inline-speech="${esc(activity.id)}" data-speech-text="${esc(p.speech_text)}">▶ Прослушать</button></div></div>` : ''
-    const feedback = attempt?.result?.correct === true ? '<div class="notice success">Richtig.</div>' : attempt?.result?.correct === false ? '<div class="notice error">Noch nicht. Versuch es noch einmal.</div>' : ''
-    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${speech}${prompt}<div class="choice-list">${options}</div>${feedback}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
+    const options = (p.options || []).map((option,index) => `<label class="choice-option ${choices.includes(index) ? 'selected' : ''}"><input type="checkbox" data-multi-choice="${esc(activity.id)}" value="${index}" ${choices.includes(index) ? 'checked' : ''}><span>${esc(option)}</span></label>`).join('')
+    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${speech}${source}${prompt}<div class="choice-list">${options}</div>${autoFeedback()}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
   }
 
-  if (activity.type === 'classification') {
+  if (activity.type === 'classification' || activity.type === 'dropdown') {
     const values = Array.isArray(attempt?.answer?.values) ? attempt.answer.values : []
-    const categories = Array.isArray(p.categories) ? p.categories : []
-    const rows = (p.items || []).map((item, index) => `<label class="structured-row"><span>${esc(item.text)}</span><select data-structured-select="${esc(activity.id)}" data-structured-index="${index}"><option value="">—</option>${categories.map(category => `<option value="${esc(category)}" ${values[index] === category ? 'selected' : ''}>${esc(category)}</option>`).join('')}</select></label>`).join('')
-    const feedback = attempt?.result?.correct === true ? '<div class="notice success">Richtig.</div>' : attempt?.result?.correct === false ? '<div class="notice error">Noch nicht. Versuch es noch einmal.</div>' : ''
-    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}<div class="structured-list">${rows}</div>${feedback}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
+    const sourceItems = Array.isArray(p.items) ? p.items : []
+    const choices = activity.type === 'classification'
+      ? (Array.isArray(p.categories) ? p.categories : [])
+      : [...new Set(sourceItems.map(item => item.answer).filter(Boolean))]
+    const rows = sourceItems.map((item,index) => `<label class="structured-row"><span lang="de">${esc(item.text)}</span><select data-structured-select="${esc(activity.id)}" data-structured-index="${index}"><option value="">—</option>${choices.map(choice => `<option value="${esc(choice)}" ${values[index] === choice ? 'selected' : ''}>${esc(choice)}</option>`).join('')}</select></label>`).join('')
+    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}<div class="structured-list">${rows}</div>${autoFeedback()}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
   }
 
   if (activity.type === 'matching') {
     const values = Array.isArray(attempt?.answer?.values) ? attempt.answer.values : []
     const pairs = Array.isArray(p.pairs) ? p.pairs : []
-    const choices = pairs.map(pair => pair[1])
-    const rows = pairs.map((pair, index) => `<label class="structured-row"><span lang="de">${esc(pair[0])}</span><select data-structured-select="${esc(activity.id)}" data-structured-index="${index}"><option value="">—</option>${choices.map(choice => `<option value="${esc(choice)}" ${values[index] === choice ? 'selected' : ''}>${esc(choice)}</option>`).join('')}</select></label>`).join('')
-    const feedback = attempt?.result?.correct === true ? '<div class="notice success">Richtig.</div>' : attempt?.result?.correct === false ? '<div class="notice error">Noch nicht. Versuch es noch einmal.</div>' : ''
-    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}<div class="structured-list">${rows}</div>${feedback}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
-  }
-
-  if (activity.type === 'dropdown') {
-    const values = Array.isArray(attempt?.answer?.values) ? attempt.answer.values : []
-    const choices = [...new Set((p.items || []).map(item => item.answer).filter(Boolean))]
-    const rows = (p.items || []).map((item, index) => `<label class="structured-row"><span lang="de">${esc(item.text)}</span><select data-structured-select="${esc(activity.id)}" data-structured-index="${index}"><option value="">—</option>${choices.map(choice => `<option value="${esc(choice)}" ${values[index] === choice ? 'selected' : ''}>${esc(choice)}</option>`).join('')}</select></label>`).join('')
-    const feedback = attempt?.result?.correct === true ? '<div class="notice success">Richtig.</div>' : attempt?.result?.correct === false ? '<div class="notice error">Noch nicht. Versuch es noch einmal.</div>' : ''
-    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}<div class="structured-list">${rows}</div>${feedback}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
-  }
-
-  if (activity.type === 'sequencing') {
-    const savedOrder = Array.isArray(attempt?.answer?.order) ? attempt.answer.order : []
-    const tokens = Array.isArray(p.items) ? p.items : []
-    const selected = savedOrder.map(index => tokens[index]).filter(Boolean)
-    const buttons = tokens.map((token, index) => `<button class="order-token" type="button" data-order-token="${index}" data-activity-id="${esc(activity.id)}">${esc(token)}</button>`).join('')
-    const built = selected.map((token, position) => `<button class="order-built-token" type="button" data-order-remove="${position}" data-activity-id="${esc(activity.id)}">${esc(token)}</button>`).join('')
-    const feedback = attempt?.result?.correct === true ? '<div class="notice success">Richtig.</div>' : attempt?.result?.correct === false && savedOrder.length ? '<div class="notice error">Noch nicht. Prüfe die Reihenfolge.</div>' : ''
-    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}<div class="word-order-bank">${buttons}</div><div class="word-order-answer" data-order-answer="${esc(activity.id)}">${built || '<span class="muted">Нажимай реплики по порядку.</span>'}</div><input type="hidden" data-order-input="${esc(activity.id)}" value="${esc(JSON.stringify(savedOrder))}">${feedback}<div class="activity-actions"><button class="btn secondary" type="button" data-order-reset="${esc(activity.id)}">Сбросить</button><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
-  }
-
-  const value = state.pendingDrafts.has(activity.id) ? state.pendingDrafts.get(activity.id) : (attempt?.answer?.text || '')
-    const fields = multiple
-      ? expected.map((_, index) => `<label class="field compact-field"><span>Lücke ${index + 1}</span><input data-gap-input="${esc(activity.id)}" data-gap-index="${index}" value="${esc(savedValues[index] || '')}" autocomplete="off"></label>`).join('')
-      : `<label class="field"><span>${esc(p.input_label || 'Вставь слово')}</span><input data-activity-input="${esc(activity.id)}" value="${esc(value)}" autocomplete="off"></label>`
-    const hasAnswer = multiple ? savedValues.some(Boolean) : String(attempt?.answer?.text || '').trim()
-    const feedback = attempt?.result?.correct === true ? `<div class="notice success">${esc(p.feedback_correct || 'Верно.')}</div>` : attempt?.result?.correct === false && hasAnswer ? `<div class="notice error">${esc(p.feedback_incorrect || 'Проверь ответы.')}</div>` : ''
-    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${prompt}<div class="structured-fields">${fields}</div>${feedback}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
+    const structuredItems = Array.isArray(p.items) ? p.items : []
+    const sourceCards = Array.isArray(p.sources) ? p.sources : []
+    const rowsData = pairs.length
+      ? pairs.map(pair => ({ text: pair[0], answer: pair[1] }))
+      : structuredItems
+    const choices = pairs.length
+      ? [...new Set(pairs.map(pair => pair[1]))]
+      : sourceCards.length ? sourceCards.map(item => item.id) : [...new Set(rowsData.map(item => item.answer).filter(Boolean))]
+    const sourcesHtml = sourceCards.length ? `<div class="matching-sources">${sourceCards.map(item => `<article class="prompt-box"><strong>${esc(item.id)}</strong><p lang="de">${esc(item.text)}</p></article>`).join('')}</div>` : ''
+    const rows = rowsData.map((item,index) => `<label class="structured-row"><span lang="de">${esc(item.text)}</span><select data-structured-select="${esc(activity.id)}" data-structured-index="${index}"><option value="">—</option>${choices.map(choice => `<option value="${esc(choice)}" ${values[index] === choice ? 'selected' : ''}>${esc(choice)}</option>`).join('')}</select></label>`).join('')
+    return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${sourcesHtml}<div class="structured-list">${rows}</div>${autoFeedback()}<div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">Проверить</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${support}</article>`
   }
 
   const value = state.pendingDrafts.has(activity.id) ? state.pendingDrafts.get(activity.id) : (attempt?.answer?.text || '')
@@ -775,9 +770,8 @@ function renderStudentActivity(activity) {
   const listening = activity.type === 'listening_text' ? `<div class="audio-panel"><div><h3>Голосовое сообщение</h3></div><div class="activity-actions"><button class="btn secondary" data-play-speech="${esc(activity.id)}">▶ Прослушать</button></div><details class="support"><summary>Показать транскрипт</summary><p lang="de">${esc(p.transcript || p.speech_text || '')}</p></details></div>` : ''
   const speaking = activity.type === 'speaking_reflection' ? `<div class="record-panel"><div class="activity-actions"><button class="btn secondary" data-record-toggle="${esc(activity.id)}" aria-pressed="false"><span aria-hidden="true">🎙</span> Записать</button><span class="small muted" role="status" aria-live="polite" data-record-live="${esc(activity.id)}"></span></div><p class="small muted">Запись остаётся только на этой странице и преподавателю не отправляется.</p><div data-record-result="${esc(activity.id)}"></div></div>` : ''
   const project = activity.id.endsWith(':project') ? projectSubmissionBlock(activity) : ''
-  if (activity.id.endsWith(':revision')) return renderRevisionActivity(activity)
 
-  return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${explanation}${prompt}${source}${items}${reconstruction}${listening}${speaking}<label class="field"><span>Мой ответ</span><textarea data-activity-input="${esc(activity.id)}" placeholder="${esc(p.placeholder || '')}">${esc(value)}</textarea></label><div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">${esc(activitySaveLabel(activity))}</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${project}${support}</article>`
+  return `<article class="activity-card" data-activity="${esc(activity.id)}">${header}${instruction}${explanation}${prompt}${source}${simpleItems}${reconstruction}${listening}${speaking}<label class="field"><span>Мой ответ</span><textarea data-activity-input="${esc(activity.id)}" placeholder="${esc(p.placeholder || '')}">${esc(value)}</textarea></label><div class="activity-actions"><button class="btn" data-save-activity="${esc(activity.id)}">${esc(activitySaveLabel(activity))}</button><span class="save-status" role="status" aria-live="polite" data-save-status="${esc(activity.id)}"></span></div>${project}${support}</article>`
 }
 
 function moduleForActivity(activity) {
@@ -935,7 +929,9 @@ async function persistActivity(activityId, explicit = true) {
     }
     let expected = []
     if (activity.type === 'classification' || activity.type === 'dropdown') expected = (activity.payload?.items || []).map(item => String(item.answer || ''))
-    if (activity.type === 'matching') expected = (activity.payload?.pairs || []).map(pair => String(pair?.[1] || ''))
+    if (activity.type === 'matching') expected = Array.isArray(activity.payload?.pairs) && activity.payload.pairs.length
+      ? activity.payload.pairs.map(pair => String(pair?.[1] || ''))
+      : (activity.payload?.items || []).map(item => String(item.answer || ''))
     answer = { values }
     result = { correct: JSON.stringify(values) === JSON.stringify(expected) }
   } else {
